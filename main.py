@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
@@ -52,8 +52,9 @@ TEMP_DIR.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
 STATIC_DIR.mkdir(exist_ok=True)
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files only if directory has content
+if any(STATIC_DIR.iterdir()) if STATIC_DIR.exists() else False:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Model paths - with fallbacks
 MASK_RCNN_MODEL_PATH = "final_model (11).pth"
@@ -246,11 +247,11 @@ async def analyze_mgda(
         raise HTTPException(status_code=503, detail="Required models not loaded (meibomio and/or tarsus)")
 
     # Validate file type
-    if not file.content_type.startswith("image/"):
+    if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
     allowed_extensions = {".jpg", ".jpeg", ".png"}
-    file_extension = Path(file.filename).suffix.lower()
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
     if file_extension not in allowed_extensions:
         raise HTTPException(status_code=400, detail=f"File extension {file_extension} not allowed. Use: {allowed_extensions}")
 
@@ -302,8 +303,15 @@ async def analyze_mgda(
 
 @app.get("/")
 async def root():
-    """Serve the main HTML interface"""
-    return FileResponse("static/index.html")
+    """API root — frontend is served from Vercel"""
+    return JSONResponse({
+        "message": "Tortuosity Analysis API",
+        "version": "1.0.0",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/health",
+        "frontend": "https://tortuosity2.vercel.app"
+    })
 
 @app.get("/api")
 async def api_info():
@@ -382,20 +390,20 @@ async def analyze_image(
         - num_glands: Number of detected glands
         - individual_tortuosities: List of individual gland tortuosities
     """
-    
+
     # Validate file type
-    if not file.content_type.startswith("image/"):
+    if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
+
     # Validate file extension
     allowed_extensions = {".jpg", ".jpeg", ".png"}
-    file_extension = Path(file.filename).suffix.lower()
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
     if file_extension not in allowed_extensions:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"File extension {file_extension} not allowed. Use: {allowed_extensions}"
         )
-    
+
     try:
         # Create temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
@@ -510,18 +518,18 @@ async def apply_clahe_filter(
     """
     
     # Validate file type
-    if not file.content_type.startswith("image/"):
+    if file.content_type and not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
-    
+
     # Validate file extension
     allowed_extensions = {".jpg", ".jpeg", ".png"}
-    file_extension = Path(file.filename).suffix.lower()
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
     if file_extension not in allowed_extensions:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"File extension {file_extension} not allowed. Use: {allowed_extensions}"
         )
-    
+
     try:
         # Create temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:

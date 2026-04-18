@@ -11,7 +11,7 @@ from pathlib import Path
 # Configure the API base URL
 # For production, use: "https://tortuosity-backend-488176611125.us-central1.run.app"
 # For local development, use: "http://localhost:8000"
-API_BASE_URL = "https://tortuosity-backend-488176611125.us-central1.run.app"
+API_BASE_URL = "https://tortuosity2-488176611125.us-central1.run.app"
 
 def test_health():
     """Test health endpoint"""
@@ -101,8 +101,8 @@ def test_image_analysis():
                 try:
                     error_data = response.json()
                     print(f"   Error: {error_data.get('detail', 'Unknown error')}")
-                except:
-                    print(f"   Response: {response.text}")
+                except Exception:
+                    print(f"   Response (first 500 chars): {response.text[:500]}")
                 return False
     except Exception as e:
         print(f"❌ Image analysis error: {e}")
