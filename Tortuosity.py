@@ -11,6 +11,7 @@ import random
 import cv2  # Needed for contour operations in tortuosity calculation
 from skimage.morphology import skeletonize
 from scipy.ndimage import distance_transform_edt
+from scipy.signal import savgol_filter
 
 # Definir dispositivo (GPU o CPU)
 device = torch.device("cpu")  # Force CPU for Cloud Run compatibility
@@ -350,42 +351,119 @@ def generate_random_color():
     return [random.randint(0, 255) for _ in range(3)]
 
 # ------------------------------------------------------
+# Helpers para el cálculo robusto de tortuosidad
+# ------------------------------------------------------
+def _skeleton_to_path(skel):
+    """
+    Recorre el esqueleto binario y devuelve un array ordenado de puntos (y, x)
+    representando la trayectoria más larga encontrada mediante traversal greedy.
+    """
+    ys, xs = np.where(skel)
+    if len(xs) < 2:
+        return None
+
+    pts = list(zip(ys.tolist(), xs.tolist()))
+    coord_set = set(pts)
+
+    def get_nbrs(y, x):
+        return [(y + dy, x + dx)
+                for dy in (-1, 0, 1) for dx in (-1, 0, 1)
+                if (dy or dx) and (y + dy, x + dx) in coord_set]
+
+    # Nodos de grado 1 = extremos del esqueleto
+    endpoints = [p for p in pts if len(get_nbrs(*p)) == 1]
+    start = endpoints[0] if endpoints else pts[0]
+
+    path = [start]
+    visited = {start}
+    cur = start
+
+    while True:
+        nbrs = [p for p in get_nbrs(*cur) if p not in visited]
+        if not nbrs:
+            break
+        # En bifurcaciones, elegir el vecino con más continuación (heurística greedy)
+        cur = nbrs[0] if len(nbrs) == 1 else max(
+            nbrs,
+            key=lambda p: len([q for q in get_nbrs(*p) if q not in visited])
+        )
+        path.append(cur)
+        visited.add(cur)
+
+    return np.array(path)
+
+
+def _smooth_path(path, window_length=11, polyorder=2):
+    """
+    Suaviza las coordenadas de una trayectoria con filtro Savitzky-Golay
+    para eliminar el zig-zag digital del esqueleto binario.
+    """
+    n = len(path)
+    wl = min(window_length, n)
+    if wl % 2 == 0:
+        wl -= 1
+    if wl < polyorder + 2:
+        wl = polyorder + 2
+        if wl % 2 == 0:
+            wl += 1
+    if wl > n or n < 4:
+        return path.astype(float)
+    ys = savgol_filter(path[:, 0].astype(float), wl, polyorder)
+    xs = savgol_filter(path[:, 1].astype(float), wl, polyorder)
+    return np.column_stack([ys, xs])
+
+
+def _path_length(path):
+    """Longitud curvilínea real de una trayectoria (suma de distancias euclidianas)."""
+    diffs = np.diff(path, axis=0)
+    return float(np.sum(np.sqrt(np.sum(diffs ** 2, axis=1))))
+
+
+# Longitud mínima de esqueleto para considerar una glándula válida
+_MIN_SKEL_PX = 10
+
+# ------------------------------------------------------
 # Función para calcular la tortuosidad de una glándula de Meibomio
 # ------------------------------------------------------
 def calculate_gland_tortuosity(mask):
     """
     Calcula la tortuosidad, longitud y grosor de una glándula de Meibomio.
 
-    Tortuosidad = (Perímetro / (2 × dimensión mayor del rectángulo mínimo)) - 1
-    Longitud    = número de píxeles del esqueleto (longitud curvilínea real, px)
+    Tortuosidad = (longitud_curvilínea_suavizada / distancia_euclidiana) - 1
+                  0 = línea recta perfecta; valores mayores = más tortuosa.
+                  El esqueleto se suaviza con Savitzky-Golay para eliminar
+                  el zig-zag digital antes de medir.
+    Longitud    = longitud curvilínea del esqueleto suavizado (px)
     Grosor      = 2 × media de la transformada de distancia sobre el esqueleto (px)
 
     Returns:
-        dict con 'tortuosity', 'length_px', 'thickness_px'
+        dict con 'tortuosity', 'length_px', 'thickness_px',
+        o None si la glándula es demasiado pequeña o fragmentada.
     """
     binary = mask.astype(np.uint8)
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if not contours:
-        return {'tortuosity': 0.0, 'length_px': 0.0, 'thickness_px': 0.0}
-
-    contour = max(contours, key=cv2.contourArea)
-    perimeter = cv2.arcLength(contour, True)
-
-    rect = cv2.minAreaRect(contour)
-    (_, (width, height), _) = rect
-    max_dim = max(width, height) if max(width, height) > 0 else 1.0
-
-    tortuosity = (perimeter / (2 * max_dim)) - 1
-    tortuosity = min(tortuosity, 1.0)
-
-    # Skeleton-based length and thickness
     skel = skeletonize(binary > 0)
-    length_px = float(np.sum(skel))
+    if int(np.sum(skel)) < _MIN_SKEL_PX:
+        return None
 
+    # --- Grosor: EDT sobre los píxeles del esqueleto (sin cambios) ---
     dist = distance_transform_edt(binary > 0)
     skel_pixels = dist[skel]
     thickness_px = float(2.0 * np.mean(skel_pixels)) if skel_pixels.size > 0 else 0.0
+
+    # --- Longitud y Tortuosidad: basadas en esqueleto suavizado ---
+    path = _skeleton_to_path(skel)
+    if path is None or len(path) < 3:
+        return None
+
+    smooth = _smooth_path(path, window_length=11, polyorder=2)
+    length_px = _path_length(smooth)
+
+    euclidean_dist = float(np.linalg.norm(smooth[-1] - smooth[0]))
+    if euclidean_dist > 1.0:
+        tortuosity = max(0.0, (length_px / euclidean_dist) - 1.0)
+    else:
+        tortuosity = 0.0
 
     return {'tortuosity': tortuosity, 'length_px': length_px, 'thickness_px': thickness_px}
 
@@ -425,6 +503,9 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
     for i in gland_ids:
         gland_mask = (pred_instance_cleaned == i).astype(np.uint8)
         metrics = calculate_gland_tortuosity(gland_mask)
+        if metrics is None:
+            # Glándula demasiado pequeña o fragmentada — se excluye
+            continue
         gland_tortuosities.append(metrics['tortuosity'])
         gland_lengths.append(metrics['length_px'])
         gland_thicknesses.append(metrics['thickness_px'])
@@ -432,9 +513,18 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         color = generate_random_color()
         colored_instance_image[pred_instance_cleaned == i] = color
 
-    avg_tortuosity = np.mean(gland_tortuosities) if gland_tortuosities else 0.0
-    avg_length = np.mean(gland_lengths) if gland_lengths else 0.0
-    avg_thickness = np.mean(gland_thicknesses) if gland_thicknesses else 0.0
+    # Filtrar outliers: tortuosidad > percentil 95 (cuando hay suficientes muestras)
+    if len(gland_tortuosities) > 3:
+        p95 = float(np.percentile(gland_tortuosities, 95))
+        keep = [t <= p95 for t in gland_tortuosities]
+        gland_tortuosities = [v for v, k in zip(gland_tortuosities, keep) if k]
+        gland_lengths      = [v for v, k in zip(gland_lengths,      keep) if k]
+        gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
+
+    # Promedio robusto: mediana en lugar de media
+    avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
+    avg_length     = float(np.median(gland_lengths))      if gland_lengths      else 0.0
+    avg_thickness  = float(np.median(gland_thicknesses))  if gland_thicknesses  else 0.0
 
     # Abrir la imagen original
     image = Image.open(image_path).convert("RGB")
@@ -454,7 +544,7 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
     plt.figure(figsize=(10, 10))
     plt.imshow(result_image)
     plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
-    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad promedio: {avg_tortuosity:.3f}")
+    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
     plt.axis("off")
     # plt.show() # Commented out for Streamlit integration
 
@@ -470,7 +560,7 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
     return img_arr, {
         'avg_tortuosity': avg_tortuosity,
         'individual_tortuosities': gland_tortuosities,
-        'num_glands': len(gland_ids),
+        'num_glands': len(gland_tortuosities),
         'avg_length_px': avg_length,
         'avg_thickness_px': avg_thickness,
         'individual_lengths': gland_lengths,
@@ -513,6 +603,8 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
     for i in gland_ids:
         gland_mask = (pred_instance_cleaned == i).astype(np.uint8)
         metrics = calculate_gland_tortuosity(gland_mask)
+        if metrics is None:
+            continue
         gland_tortuosities.append(metrics['tortuosity'])
         gland_lengths.append(metrics['length_px'])
         gland_thicknesses.append(metrics['thickness_px'])
@@ -520,9 +612,18 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
         color = generate_random_color()
         colored_instance_image[pred_instance_cleaned == i] = color
 
-    avg_tortuosity = np.mean(gland_tortuosities) if gland_tortuosities else 0.0
-    avg_length = np.mean(gland_lengths) if gland_lengths else 0.0
-    avg_thickness = np.mean(gland_thicknesses) if gland_thicknesses else 0.0
+    # Filtrar outliers: tortuosidad > percentil 95
+    if len(gland_tortuosities) > 3:
+        p95 = float(np.percentile(gland_tortuosities, 95))
+        keep = [t <= p95 for t in gland_tortuosities]
+        gland_tortuosities = [v for v, k in zip(gland_tortuosities, keep) if k]
+        gland_lengths      = [v for v, k in zip(gland_lengths,      keep) if k]
+        gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
+
+    # Promedio robusto: mediana
+    avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
+    avg_length     = float(np.median(gland_lengths))      if gland_lengths      else 0.0
+    avg_thickness  = float(np.median(gland_thicknesses))  if gland_thicknesses  else 0.0
 
     image = Image.open(image_path).convert("RGB")
     image_np = np.array(image)
@@ -539,7 +640,7 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
     plt.figure(figsize=(10, 10))
     plt.imshow(result_image)
     plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
-    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad promedio: {avg_tortuosity:.3f}")
+    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
     plt.axis("off")
     # plt.show() # Commented out for Streamlit integration
 
@@ -553,7 +654,7 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
     return img_arr, {
         'avg_tortuosity': avg_tortuosity,
         'individual_tortuosities': gland_tortuosities,
-        'num_glands': len(gland_ids),
+        'num_glands': len(gland_tortuosities),
         'avg_length_px': avg_length,
         'avg_thickness_px': avg_thickness,
         'individual_lengths': gland_lengths,
