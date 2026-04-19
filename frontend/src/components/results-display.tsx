@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -52,9 +53,39 @@ interface ResultsDisplayProps {
   processedImage: string;
 }
 
+function toFiniteNumber(v: unknown): number | undefined {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function median(nums: number[]): number | undefined {
+  const a = nums.filter(Number.isFinite).sort((x, y) => x - y);
+  if (!a.length) return undefined;
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+}
+
 export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
   const calibrated = (data.um_per_px ?? 1.0) > 1.0;
   const unitLabel = calibrated ? "µm" : "px";
+
+  const glands = data.individual_glands ?? [];
+
+  const { avgITA, avgScore, avgICM } = useMemo(() => {
+    const list = data.individual_glands ?? [];
+    const itas = list.map((g) => toFiniteNumber(g.ITA_deg)).filter((n): n is number => n !== undefined);
+    const scores = list.map((g) => toFiniteNumber(g.tortuosity_score)).filter((n): n is number => n !== undefined);
+    const icms = list.map((g) => toFiniteNumber(g.ICM)).filter((n): n is number => n !== undefined);
+    return {
+      avgITA: toFiniteNumber(data.avg_ITA_deg) ?? (itas.length ? median(itas) : undefined),
+      avgScore: toFiniteNumber(data.avg_tortuosity_score) ?? (scores.length ? median(scores) : undefined),
+      avgICM: toFiniteNumber(data.avg_ICM) ?? (icms.length ? median(icms) : undefined),
+    };
+  }, [data.avg_ITA_deg, data.avg_tortuosity_score, data.avg_ICM, data.individual_glands]);
 
   const getGradeStyle = (grade: string) => {
     switch (grade) {
@@ -74,16 +105,18 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
     return "Severa";
   };
 
-  const globalGrade = data.avg_tortuosity_score != null
-    ? scoreToGrade(data.avg_tortuosity_score)
-    : (data.dominant_grade ?? "Normal");
+  const globalGrade =
+    avgScore != null
+      ? scoreToGrade(avgScore)
+      : data.dominant_grade ?? "Normal";
 
   const chartData = data.individual_tortuosities.map((value, index) => {
-    const g = data.individual_glands?.[index];
+    const g = glands[index];
+    const rawScore = toFiniteNumber(g?.tortuosity_score);
     return {
       gland: g?.gland_id ?? `G${index + 1}`,
-      score: g?.tortuosity_score ?? null,
-      ICM: g?.ICM ?? value,
+      score: rawScore ?? 0,
+      ICM: toFiniteNumber(g?.ICM) ?? value,
     };
   });
 
@@ -97,7 +130,9 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <Activity className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-lg sm:text-2xl font-bold">{data.avg_ICM?.toFixed(4) ?? data.avg_tortuosity?.toFixed(3) ?? "—"}</div>
+            <div className="text-lg sm:text-2xl font-bold">
+              {avgICM != null ? avgICM.toFixed(4) : data.avg_tortuosity?.toFixed(3) ?? "—"}
+            </div>
             <p className="text-xs text-muted-foreground">Índice curva media</p>
           </CardContent>
         </Card>
@@ -119,7 +154,9 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <Info className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-lg sm:text-2xl font-bold">{data.avg_ITA_deg?.toFixed(1) ?? "—"}°</div>
+            <div className="text-lg sm:text-2xl font-bold">
+              {avgITA != null ? `${avgITA.toFixed(1)}°` : "—"}
+            </div>
             <p className="text-xs text-muted-foreground">Ángulo tangente acum.</p>
           </CardContent>
         </Card>
@@ -131,7 +168,9 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
           </CardHeader>
           <CardContent>
             <div className="text-lg sm:text-2xl font-bold">{globalGrade}</div>
-            <p className="text-xs text-muted-foreground">Score: {data.avg_tortuosity_score?.toFixed(1) ?? "—"}/100</p>
+            <p className="text-xs text-muted-foreground">
+              Score: {avgScore != null ? `${avgScore.toFixed(1)}/100` : "—"}
+            </p>
           </CardContent>
         </Card>
 
@@ -176,17 +215,20 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">ICM Promedio</div>
-                <div className="font-bold text-lg">{data.avg_ICM?.toFixed(4) ?? "—"}</div>
+                <div className="font-bold text-lg">{avgICM != null ? avgICM.toFixed(4) : "—"}</div>
                 <div className="text-xs text-muted-foreground">longitud / distancia directa</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">ITA Promedio</div>
-                <div className="font-bold text-lg">{data.avg_ITA_deg?.toFixed(1) ?? "—"}°</div>
+                <div className="font-bold text-lg">{avgITA != null ? `${avgITA.toFixed(1)}°` : "—"}</div>
                 <div className="text-xs text-muted-foreground">suma de ángulos tangentes</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">Score Clínico</div>
-                <div className="font-bold text-lg">{data.avg_tortuosity_score?.toFixed(1) ?? "—"}<span className="text-sm font-normal">/100</span></div>
+                <div className="font-bold text-lg">
+                  {avgScore != null ? avgScore.toFixed(1) : "—"}
+                  <span className="text-sm font-normal">/100</span>
+                </div>
                 <div className="text-xs text-muted-foreground">ponderado multi-índice</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
@@ -247,14 +289,21 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                 </TableHeader>
                 <TableBody>
                   {data.individual_tortuosities.map((value, index) => {
-                    const g = data.individual_glands?.[index];
+                    const g = glands[index];
+                    const icmN = toFiniteNumber(g?.ICM);
+                    const itaN = toFiniteNumber(g?.ITA_deg);
+                    const scoreN = toFiniteNumber(g?.tortuosity_score);
                     const grade = g?.tortuosity_grade ?? (value <= 0.1 ? "Normal" : value <= 0.2 ? "Leve" : "Severa");
                     const gradeStyle = getGradeStyle(grade);
                     return (
                       <TableRow key={index}>
                         <TableCell className="font-medium text-xs sm:text-sm">{g?.gland_id ?? `G${index + 1}`}</TableCell>
-                        <TableCell className="text-xs sm:text-sm">{g?.ICM?.toFixed(4) ?? value.toFixed(3)}</TableCell>
-                        <TableCell className="text-xs sm:text-sm">{g?.ITA_deg?.toFixed(1) ?? "—"}</TableCell>
+                        <TableCell className="text-xs sm:text-sm">
+                          {icmN != null ? icmN.toFixed(4) : value.toFixed(3)}
+                        </TableCell>
+                        <TableCell className="text-xs sm:text-sm">
+                          {itaN != null ? itaN.toFixed(1) : "—"}
+                        </TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {calibrated
                             ? (g?.length_um?.toFixed(0) ?? "—")
@@ -265,7 +314,9 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                             ? (g?.thickness_um?.toFixed(0) ?? "—")
                             : (data.individual_thicknesses?.[index]?.toFixed(1) ?? "—")}
                         </TableCell>
-                        <TableCell className="text-xs sm:text-sm">{g?.tortuosity_score?.toFixed(1) ?? "—"}</TableCell>
+                        <TableCell className="text-xs sm:text-sm">
+                          {scoreN != null ? scoreN.toFixed(1) : "—"}
+                        </TableCell>
                         <TableCell>
                           <Badge className={`${gradeStyle.color} text-white text-xs`}>
                             {gradeStyle.label}
@@ -294,10 +345,16 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                 <XAxis dataKey="gland" />
                 <YAxis domain={[0, 100]} tickCount={6} />
                 <Tooltip
-                  formatter={(value: number, name: string) => [
-                    name === "score" ? `${value.toFixed(1)} / 100` : value.toFixed(4),
-                    name === "score" ? "Score clínico" : "ICM"
-                  ]}
+                  formatter={(value: unknown, name: string) => {
+                    const n = typeof value === "number" && Number.isFinite(value) ? value : NaN;
+                    if (name === "score") {
+                      return [
+                        Number.isFinite(n) ? `${n.toFixed(1)} / 100` : "—",
+                        "Score clínico",
+                      ];
+                    }
+                    return [Number.isFinite(n) ? n.toFixed(4) : "—", "ICM"];
+                  }}
                   labelFormatter={(label) => `Glándula ${label}`}
                 />
                 <Bar dataKey="score" fill="#3b82f6" radius={[4, 4, 0, 0]} name="score" />

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -461,7 +462,8 @@ async def analyze_image(
         individual_tortuosities = tortuosity_data['individual_tortuosities']
         individual_lengths = tortuosity_data.get('individual_lengths', [])
         individual_thicknesses = tortuosity_data.get('individual_thicknesses', [])
-        return {
+        # jsonable_encoder: convierte numpy / tipos no estándar en JSON válido (evita pérdida de campos anidados)
+        return jsonable_encoder({
             "success": True,
             "message": "Analysis completed successfully",
             "data": {
@@ -490,7 +492,7 @@ async def analyze_image(
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
             }
-        }
+        })
         
     except FileNotFoundError as e:
         raise HTTPException(
