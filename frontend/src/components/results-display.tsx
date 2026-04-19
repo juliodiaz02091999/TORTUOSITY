@@ -56,12 +56,6 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
   const calibrated = (data.um_per_px ?? 1.0) > 1.0;
   const unitLabel = calibrated ? "µm" : "px";
 
-  const getInterpretation = (value: number) => {
-    if (value <= 0.1) return { text: "Baja (Normal)", color: "bg-green-500" };
-    if (value <= 0.2) return { text: "Moderada", color: "bg-yellow-500" };
-    return { text: "Alta (MGD)", color: "bg-red-500" };
-  };
-
   const getGradeStyle = (grade: string) => {
     switch (grade) {
       case "Normal":   return { color: "bg-green-500",  label: "Normal" };

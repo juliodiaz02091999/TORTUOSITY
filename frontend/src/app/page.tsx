@@ -66,14 +66,14 @@ interface AnalysisResult {
         max: number;
       };
     };
-    um_per_px: number;
-    avg_length_um: number;
-    avg_thickness_um: number;
-    avg_ICM: number;
-    avg_ITA_deg: number;
-    avg_tortuosity_score: number;
-    dominant_grade: string;
-    individual_glands: GlandResult[];
+    um_per_px?: number;
+    avg_length_um?: number;
+    avg_thickness_um?: number;
+    avg_ICM?: number;
+    avg_ITA_deg?: number;
+    avg_tortuosity_score?: number;
+    dominant_grade?: string;
+    individual_glands?: GlandResult[];
   };
 }
 

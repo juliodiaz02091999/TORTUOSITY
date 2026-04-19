@@ -29,6 +29,22 @@ interface PhotoManagerProps {
   onTabChange?: (tab: 'upload' | 'capture' | 'results' | 'info') => void;
 }
 
+interface GlandResult {
+  gland_id: string;
+  length_px: number;
+  length_um: number;
+  thickness_px: number;
+  thickness_um: number;
+  aspect_ratio: number;
+  area_um2: number;
+  ICM: number;
+  ITA_deg: number;
+  DCF: number;
+  IMCC: number;
+  tortuosity_score: number;
+  tortuosity_grade: string;
+}
+
 interface AnalysisResults {
   success: boolean;
   message: string;
@@ -48,6 +64,14 @@ interface AnalysisResults {
         max: number;
       };
     };
+    um_per_px?: number;
+    avg_length_um?: number;
+    avg_thickness_um?: number;
+    avg_ICM?: number;
+    avg_ITA_deg?: number;
+    avg_tortuosity_score?: number;
+    dominant_grade?: string;
+    individual_glands?: GlandResult[];
   };
   processedImage?: string;
   timestamp?: Date;
@@ -218,7 +242,15 @@ export function PhotoManager({ onPhotoSelect, onAnalysisComplete, onTabChange }:
               min: Math.min(...(result.data.individual_tortuosities || [0])),
               max: Math.max(...(result.data.individual_tortuosities || [0]))
             }
-          }
+          },
+          um_per_px: result.data.um_per_px,
+          avg_length_um: result.data.avg_length_um,
+          avg_thickness_um: result.data.avg_thickness_um,
+          avg_ICM: result.data.avg_ICM,
+          avg_ITA_deg: result.data.avg_ITA_deg,
+          avg_tortuosity_score: result.data.avg_tortuosity_score,
+          dominant_grade: result.data.dominant_grade,
+          individual_glands: result.data.individual_glands,
         },
         processedImage: result.data.processed_image || '',
         timestamp: new Date()
