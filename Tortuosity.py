@@ -12,6 +12,7 @@ import cv2  # Needed for contour operations in tortuosity calculation
 from skimage.morphology import skeletonize
 from scipy.ndimage import distance_transform_edt
 from scipy.signal import savgol_filter
+from Pipeline import SpatialCalibrator, GlandMorphometry, TortuosityAnalyzer
 
 # Definir dispositivo (GPU o CPU)
 device = torch.device("cpu")  # Force CPU for Cloud Run compatibility
@@ -470,7 +471,7 @@ def calculate_gland_tortuosity(mask):
 # ------------------------------------------------------
 # Función de visualización y combinación final
 # ------------------------------------------------------
-def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, device):
+def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, device, um_per_px: float = 1.0):
     # Usar modelos ya cargados (no cargar de nuevo)
 
     # Predicción de la máscara de instancias (glándulas de Meibomio)
@@ -500,6 +501,12 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
     gland_ids = np.unique(pred_instance_cleaned)
     gland_ids = gland_ids[gland_ids > 0]  # Excluir el fondo (0)
 
+    # Inicializar analizadores Pipeline (métricas calibradas + tortuosidad multi-índice)
+    cal = SpatialCalibrator(um_per_px=um_per_px)
+    morph_analyzer = GlandMorphometry(cal)
+    tort_analyzer = TortuosityAnalyzer()
+    pipeline_results = []
+
     for i in gland_ids:
         gland_mask = (pred_instance_cleaned == i).astype(np.uint8)
         metrics = calculate_gland_tortuosity(gland_mask)
@@ -509,6 +516,16 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         gland_tortuosities.append(metrics['tortuosity'])
         gland_lengths.append(metrics['length_px'])
         gland_thicknesses.append(metrics['thickness_px'])
+
+        # Análisis enriquecido: métricas en µm + ICM, ITA, DCF, IMCC, score, grade
+        morph_data = morph_analyzer.measure(gland_mask)
+        skel_p = skeletonize((gland_mask > 0).astype(np.uint8))
+        ordered_pts = morph_analyzer._order_skeleton_points(skel_p)
+        # Suavizado Savitzky-Golay: elimina el zig-zag digital del esqueleto
+        # antes de calcular ITA y curvatura (igual que en calculate_gland_tortuosity)
+        smooth_pts = _smooth_path(ordered_pts)
+        tort_data = tort_analyzer.compute(smooth_pts, morph_data["length_um"])
+        pipeline_results.append({**morph_data, **tort_data, "gland_id": f"G{len(pipeline_results)+1}"})
 
         color = generate_random_color()
         colored_instance_image[pred_instance_cleaned == i] = color
@@ -520,11 +537,25 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         gland_tortuosities = [v for v, k in zip(gland_tortuosities, keep) if k]
         gland_lengths      = [v for v, k in zip(gland_lengths,      keep) if k]
         gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
+        pipeline_results   = [v for v, k in zip(pipeline_results,   keep) if k]
 
     # Promedio robusto: mediana en lugar de media
     avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
     avg_length     = float(np.median(gland_lengths))      if gland_lengths      else 0.0
     avg_thickness  = float(np.median(gland_thicknesses))  if gland_thicknesses  else 0.0
+
+    # Resumen Pipeline (métricas calibradas en µm + clasificación clínica)
+    if pipeline_results:
+        from collections import Counter
+        avg_length_um    = float(np.median([r['length_um']        for r in pipeline_results]))
+        avg_thickness_um = float(np.median([r['thickness_um']     for r in pipeline_results]))
+        avg_ICM          = float(np.median([r['ICM']              for r in pipeline_results]))
+        avg_ITA          = float(np.median([r['ITA_deg']          for r in pipeline_results]))
+        avg_score        = float(np.median([r['tortuosity_score'] for r in pipeline_results]))
+        dominant_grade   = Counter([r['tortuosity_grade'] for r in pipeline_results]).most_common(1)[0][0]
+    else:
+        avg_length_um = avg_thickness_um = avg_ICM = avg_ITA = avg_score = 0.0
+        dominant_grade = "Normal"
 
     # Abrir la imagen original
     image = Image.open(image_path).convert("RGB")
@@ -566,6 +597,15 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         'individual_lengths': gland_lengths,
         'individual_thicknesses': gland_thicknesses,
         'binary_mask_glands': binary_mask_glands,
+        # Pipeline: métricas calibradas + clasificación clínica
+        'um_per_px': um_per_px,
+        'avg_length_um': round(avg_length_um, 1),
+        'avg_thickness_um': round(avg_thickness_um, 1),
+        'avg_ICM': round(avg_ICM, 4),
+        'avg_ITA_deg': round(avg_ITA, 2),
+        'avg_tortuosity_score': round(avg_score, 1),
+        'dominant_grade': dominant_grade,
+        'individual_glands': pipeline_results,
     }
 
 def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, device):

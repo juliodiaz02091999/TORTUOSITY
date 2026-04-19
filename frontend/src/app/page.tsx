@@ -31,6 +31,22 @@ import {
   Calculator
 } from "lucide-react";
 
+interface GlandResult {
+  gland_id: string;
+  length_px: number;
+  length_um: number;
+  thickness_px: number;
+  thickness_um: number;
+  aspect_ratio: number;
+  area_um2: number;
+  ICM: number;
+  ITA_deg: number;
+  DCF: number;
+  IMCC: number;
+  tortuosity_score: number;
+  tortuosity_grade: string;
+}
+
 interface AnalysisResult {
   success: boolean;
   message: string;
@@ -50,6 +66,14 @@ interface AnalysisResult {
         max: number;
       };
     };
+    um_per_px: number;
+    avg_length_um: number;
+    avg_thickness_um: number;
+    avg_ICM: number;
+    avg_ITA_deg: number;
+    avg_tortuosity_score: number;
+    dominant_grade: string;
+    individual_glands: GlandResult[];
   };
 }
 
@@ -83,8 +107,17 @@ export default function DashboardPage() {
   const [isApplyingClahe, setIsApplyingClahe] = useState(false);
   const [convertToGray, setConvertToGray] = useState(true);
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
+  const [umPerPx, setUmPerPx] = useState<number>(1.0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
+  const EQUIPMENT_PRESETS = [
+    { label: "Sin calibración (píxeles)", value: 1.0 },
+    { label: "Keratograph 5M — 10x (8.0 µm/px)", value: 8.0 },
+    { label: "Keratograph 5M — 16x (5.0 µm/px)", value: 5.0 },
+    { label: "LipiView II (6.5 µm/px)", value: 6.5 },
+    { label: "Lámpara de hendidura 40x (11.76 µm/px)", value: 11.76 },
+  ];
 
   // Check if device is mobile on mount and resize
   useEffect(() => {
@@ -186,6 +219,7 @@ export default function DashboardPage() {
 
       const formData = new FormData();
       formData.append("file", fileToAnalyze);
+      formData.append("um_per_px", umPerPx.toString());
 
       const response = await fetch("/api/analyze", {
         method: "POST",
@@ -603,6 +637,25 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     
+                    {/* Calibración espacial */}
+                    <div className="flex flex-col items-center space-y-2 w-full">
+                      <Label className="text-sm font-medium">Calibración espacial</Label>
+                      <select
+                        value={umPerPx}
+                        onChange={(e) => setUmPerPx(parseFloat(e.target.value))}
+                        className="w-full max-w-sm rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        {EQUIPMENT_PRESETS.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-muted-foreground text-center">
+                        {umPerPx === 1.0
+                          ? "Las medidas se mostrarán en píxeles"
+                          : `Factor: ${umPerPx} µm/px — medidas en micrómetros reales`}
+                      </p>
+                    </div>
+
                     <div className="flex flex-col sm:flex-row gap-2 justify-center">
                       <Button 
                         onClick={analyzeImage} 

@@ -375,6 +375,7 @@ async def model_status():
 @app.post("/analyze")
 async def analyze_image(
     file: UploadFile = File(...),
+    um_per_px: float = Form(1.0),
     background_tasks: BackgroundTasks = None
 ):
     """
@@ -429,10 +430,11 @@ async def analyze_image(
         
         # Perform analysis using pre-loaded models
         result_image, tortuosity_data = show_combined_result_with_models(
-            temp_file_path, 
-            maskrcnn_model, 
-            unet_model, 
-            device
+            temp_file_path,
+            maskrcnn_model,
+            unet_model,
+            device,
+            um_per_px=um_per_px
         )
         
         # Convert result image to base64
@@ -478,7 +480,15 @@ async def analyze_image(
                         "min": round(min(individual_tortuosities), 3) if individual_tortuosities else 0,
                         "max": round(max(individual_tortuosities), 3) if individual_tortuosities else 0
                     }
-                }
+                },
+                "um_per_px": tortuosity_data.get('um_per_px', 1.0),
+                "avg_length_um": tortuosity_data.get('avg_length_um', 0.0),
+                "avg_thickness_um": tortuosity_data.get('avg_thickness_um', 0.0),
+                "avg_ICM": tortuosity_data.get('avg_ICM', 0.0),
+                "avg_ITA_deg": tortuosity_data.get('avg_ITA_deg', 0.0),
+                "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
+                "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
+                "individual_glands": tortuosity_data.get('individual_glands', []),
             }
         }
         
