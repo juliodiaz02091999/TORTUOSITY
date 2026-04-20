@@ -11,3 +11,5 @@ opencv-python==4.10.0.84
 matplotlib==3.10.0
 scipy==1.15.2
 psutil==6.1.1
+pydicom==3.0.1
+pandas==2.2.3
