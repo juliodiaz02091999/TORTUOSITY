@@ -513,12 +513,13 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         if metrics is None:
             # Glándula demasiado pequeña o fragmentada — se excluye
             continue
+        # Misma morfometría que pipeline (esqueleto + SG) para que avg_length_px y avg_length_um cuadren
+        morph_data = morph_analyzer.measure(gland_mask)
         gland_tortuosities.append(metrics['tortuosity'])
-        gland_lengths.append(metrics['length_px'])
-        gland_thicknesses.append(metrics['thickness_px'])
+        gland_lengths.append(morph_data["length_px"])
+        gland_thicknesses.append(morph_data["thickness_px"])
 
         # Análisis enriquecido: métricas en µm + ICM, ITA, DCF, IMCC, score, grade
-        morph_data = morph_analyzer.measure(gland_mask)
         skel_p = skeletonize((gland_mask > 0).astype(np.uint8))
         ordered_pts = morph_analyzer._order_skeleton_points(skel_p)
         # Suavizado Savitzky-Golay: elimina el zig-zag digital del esqueleto
@@ -539,18 +540,19 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
         pipeline_results   = [v for v, k in zip(pipeline_results,   keep) if k]
 
-    # Promedio robusto: mediana en lugar de media
+    # Tortuosidad clásica: mediana robusta; longitud/grosor en px para tarjetas sin calibrar = media
     avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
-    avg_length     = float(np.median(gland_lengths))      if gland_lengths      else 0.0
-    avg_thickness  = float(np.median(gland_thicknesses))  if gland_thicknesses  else 0.0
+    avg_length     = float(np.mean(gland_lengths))       if gland_lengths      else 0.0
+    avg_thickness  = float(np.mean(gland_thicknesses))   if gland_thicknesses  else 0.0
 
     # Resumen Pipeline (métricas calibradas en µm + clasificación clínica)
     if pipeline_results:
         from collections import Counter
-        avg_length_um    = float(np.median([r['length_um']        for r in pipeline_results]))
-        avg_thickness_um = float(np.median([r['thickness_um']     for r in pipeline_results]))
+        # Tarjetas ITA / longitud / grosor: promedio aritmético; ICM y score siguen con mediana
+        avg_length_um    = float(np.mean([r['length_um']        for r in pipeline_results]))
+        avg_thickness_um = float(np.mean([r['thickness_um']     for r in pipeline_results]))
         avg_ICM          = float(np.median([r['ICM']              for r in pipeline_results]))
-        avg_ITA          = float(np.median([r['ITA_deg']          for r in pipeline_results]))
+        avg_ITA          = float(np.mean([r['ITA_deg']          for r in pipeline_results]))
         avg_score        = float(np.median([r['tortuosity_score'] for r in pipeline_results]))
         dominant_grade   = Counter([r['tortuosity_grade'] for r in pipeline_results]).most_common(1)[0][0]
     else:

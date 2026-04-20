@@ -16,6 +16,7 @@ import torch
 import numpy as np
 import cv2
 from scipy.ndimage import distance_transform_edt
+from scipy.signal import savgol_filter
 from skimage.morphology import skeletonize
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
@@ -117,46 +118,74 @@ class GlandMorphometry:
 
     def _order_skeleton_points(self, skel: np.ndarray) -> np.ndarray:
         """
-        Ordena los puntos del esqueleto de extremo a extremo
-        usando BFS desde el punto terminal más alejado.
+        Recorre el esqueleto como una sola polilínea continua (8-vecinos), extremo a extremo.
+
+        El BFS por niveles que había antes podía, en bifurcaciones, colocar píxeles
+        consecutivos en la lista que no son vecinos en el grafo del esqueleto; eso
+        introduce saltos y ángulos espurios y sube ITA/ICM → grados clínicos inflados.
+        Misma idea que el recorrido greedy de Tortuosity._skeleton_to_path.
         """
-        pts = np.argwhere(skel > 0)
-        if len(pts) < 2:
-            return pts
+        ys, xs = np.where(skel > 0)
+        if len(xs) < 2:
+            return np.argwhere(skel > 0)
 
-        # Encontrar puntos terminales (vecinos == 1)
-        terminals = []
-        for p in pts:
-            r, c = p
-            patch = skel[max(0,r-1):r+2, max(0,c-1):c+2]
-            if patch.sum() - 1 == 1:  # solo un vecino
-                terminals.append(p)
+        pts = list(zip(ys.tolist(), xs.tolist()))
+        coord_set = set(pts)
 
-        start = terminals[0] if terminals else pts[0]
+        def get_nbrs(y, x):
+            return [
+                (y + dy, x + dx)
+                for dy in (-1, 0, 1)
+                for dx in (-1, 0, 1)
+                if (dy or dx) and (y + dy, x + dx) in coord_set
+            ]
 
-        # BFS para ordenar
-        visited = set()
-        ordered = []
-        queue = [tuple(start)]
-        while queue:
-            curr = queue.pop(0)
-            if curr in visited:
-                continue
-            visited.add(curr)
-            ordered.append(curr)
-            r, c = curr
-            for dr in [-1, 0, 1]:
-                for dc in [-1, 0, 1]:
-                    if dr == 0 and dc == 0:
-                        continue
-                    nb = (r + dr, c + dc)
-                    if (0 <= nb[0] < skel.shape[0] and
-                            0 <= nb[1] < skel.shape[1] and
-                            skel[nb[0], nb[1]] > 0 and
-                            nb not in visited):
-                        queue.append(nb)
+        endpoints = [p for p in pts if len(get_nbrs(*p)) == 1]
+        start = endpoints[0] if endpoints else pts[0]
 
-        return np.array(ordered)
+        path = [start]
+        visited = {start}
+        cur = start
+        while True:
+            nbrs = [p for p in get_nbrs(*cur) if p not in visited]
+            if not nbrs:
+                break
+            cur = (
+                nbrs[0]
+                if len(nbrs) == 1
+                else max(
+                    nbrs,
+                    key=lambda p: len([q for q in get_nbrs(*p) if q not in visited]),
+                )
+            )
+            path.append(cur)
+            visited.add(cur)
+
+        return np.array(path)
+
+    def _smooth_polyline(
+        self, path: np.ndarray, window_length: int = 11, polyorder: int = 2
+    ) -> np.ndarray:
+        """
+        Suaviza la polilínea del esqueleto (Savitzky–Golay) para quitar el zig-zag
+        de la malla en píxeles. Sin esto, la suma de segmentos sobreestima la longitud
+        real del eje glandular (valores absurdos en µm con K correcto).
+        """
+        if path is None or len(path) < 4:
+            return path.astype(float) if path is not None else path
+        n = len(path)
+        wl = min(window_length, n)
+        if wl % 2 == 0:
+            wl -= 1
+        if wl < polyorder + 2:
+            wl = polyorder + 2
+            if wl % 2 == 0:
+                wl += 1
+        if wl > n:
+            return path.astype(float)
+        ys = savgol_filter(path[:, 0].astype(float), wl, polyorder)
+        xs = savgol_filter(path[:, 1].astype(float), wl, polyorder)
+        return np.column_stack([ys, xs])
 
     def _polyline_length(self, pts: np.ndarray) -> float:
         """Longitud acumulada del polígono de puntos (conectividad 8)."""
@@ -180,9 +209,10 @@ class GlandMorphometry:
 
         skel = self._extract_skeleton(binary)
         pts  = self._order_skeleton_points(skel)
+        smooth = self._smooth_polyline(pts)
 
-        # Longitud = suma de segmentos del esqueleto
-        length_px = self._polyline_length(pts)
+        # Longitud = eje sobre polilínea suavizada (alinea con Tortuosity.calculate_gland_tortuosity)
+        length_px = self._polyline_length(smooth)
 
         # Grosor = 2 × media de la transformada de distancia sobre el esqueleto
         dist_map  = distance_transform_edt(binary)
@@ -454,9 +484,10 @@ class MeibographyPipeline:
             morph_data = self.morph.measure(mask)
 
             # ---- Tortuosidad ----
-            skel     = skeletonize((mask > 0).astype(np.uint8))
-            ordered  = self.morph._order_skeleton_points(skel)
-            tort_data = self.tort.compute(ordered, morph_data["length_um"])
+            skel = skeletonize((mask > 0).astype(np.uint8))
+            ordered = self.morph._order_skeleton_points(skel)
+            smooth = self.morph._smooth_polyline(ordered)
+            tort_data = self.tort.compute(smooth, morph_data["length_um"])
 
             results.glands.append(GlandResult(
                 gland_id    = gland_id,

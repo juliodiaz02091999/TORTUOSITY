@@ -69,23 +69,50 @@ function median(nums: number[]): number | undefined {
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
 }
 
+function minMax(nums: number[]): { min?: number; max?: number } {
+  const a = nums.filter(Number.isFinite);
+  if (!a.length) return {};
+  return { min: Math.min(...a), max: Math.max(...a) };
+}
+
+function arithmeticMean(nums: number[]): number | undefined {
+  const a = nums.filter(Number.isFinite);
+  if (!a.length) return undefined;
+  return a.reduce((s, x) => s + x, 0) / a.length;
+}
+
 export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
   const calibrated = (data.um_per_px ?? 1.0) > 1.0;
   const unitLabel = calibrated ? "µm" : "px";
 
   const glands = data.individual_glands ?? [];
 
-  const { avgITA, avgScore, avgICM } = useMemo(() => {
+  const { meanITA, itaRange, avgScore, avgICM } = useMemo(() => {
     const list = data.individual_glands ?? [];
     const itas = list.map((g) => toFiniteNumber(g.ITA_deg)).filter((n): n is number => n !== undefined);
     const scores = list.map((g) => toFiniteNumber(g.tortuosity_score)).filter((n): n is number => n !== undefined);
     const icms = list.map((g) => toFiniteNumber(g.ICM)).filter((n): n is number => n !== undefined);
+    const backendMeanIta = toFiniteNumber(data.avg_ITA_deg);
     return {
-      avgITA: toFiniteNumber(data.avg_ITA_deg) ?? (itas.length ? median(itas) : undefined),
+      meanITA: backendMeanIta ?? (itas.length ? arithmeticMean(itas) : undefined),
+      itaRange: minMax(itas),
       avgScore: toFiniteNumber(data.avg_tortuosity_score) ?? (scores.length ? median(scores) : undefined),
       avgICM: toFiniteNumber(data.avg_ICM) ?? (icms.length ? median(icms) : undefined),
     };
   }, [data.avg_ITA_deg, data.avg_tortuosity_score, data.avg_ICM, data.individual_glands]);
+
+  const tableRows = useMemo(() => {
+    if (glands.length > 0) {
+      return glands.map((g, i) => ({
+        g,
+        legacyTort: data.individual_tortuosities[i] ?? 0,
+      }));
+    }
+    return data.individual_tortuosities.map((legacyTort, i) => ({
+      g: undefined as GlandResult | undefined,
+      legacyTort,
+    }));
+  }, [glands, data.individual_tortuosities]);
 
   const getGradeStyle = (grade: string) => {
     switch (grade) {
@@ -110,13 +137,12 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
       ? scoreToGrade(avgScore)
       : data.dominant_grade ?? "Normal";
 
-  const chartData = data.individual_tortuosities.map((value, index) => {
-    const g = glands[index];
+  const chartData = tableRows.map(({ g, legacyTort }, index) => {
     const rawScore = toFiniteNumber(g?.tortuosity_score);
     return {
       gland: g?.gland_id ?? `G${index + 1}`,
       score: rawScore ?? 0,
-      ICM: toFiniteNumber(g?.ICM) ?? value,
+      ICM: toFiniteNumber(g?.ICM) ?? legacyTort,
     };
   });
 
@@ -150,14 +176,19 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
 
         <Card className="border-border">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium">ITA Promedio</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium">ITA (promedio)</CardTitle>
             <Info className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-lg sm:text-2xl font-bold">
-              {avgITA != null ? `${avgITA.toFixed(1)}°` : "—"}
+              {meanITA != null ? `${meanITA.toFixed(1)}°` : "—"}
             </div>
             <p className="text-xs text-muted-foreground">Ángulo tangente acum.</p>
+            {itaRange.min != null && itaRange.max != null && itaRange.max !== itaRange.min ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                En tabla: {itaRange.min.toFixed(1)}° – {itaRange.max.toFixed(1)}°
+              </p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -176,7 +207,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
 
         <Card className="border-border">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium">Longitud Media</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium">Longitud (promedio)</CardTitle>
             <Ruler className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -189,7 +220,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
 
         <Card className="border-border">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium">Grosor Medio</CardTitle>
+            <CardTitle className="text-xs sm:text-sm font-medium">Grosor (promedio)</CardTitle>
             <AlignVerticalJustifyCenter className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -214,14 +245,14 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="p-3 rounded-lg bg-muted text-center">
-                <div className="text-xs text-muted-foreground mb-1">ICM Promedio</div>
+                <div className="text-xs text-muted-foreground mb-1">ICM (mediana)</div>
                 <div className="font-bold text-lg">{avgICM != null ? avgICM.toFixed(4) : "—"}</div>
                 <div className="text-xs text-muted-foreground">longitud / distancia directa</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
-                <div className="text-xs text-muted-foreground mb-1">ITA Promedio</div>
-                <div className="font-bold text-lg">{avgITA != null ? `${avgITA.toFixed(1)}°` : "—"}</div>
-                <div className="text-xs text-muted-foreground">suma de ángulos tangentes</div>
+                <div className="text-xs text-muted-foreground mb-1">ITA (promedio)</div>
+                <div className="font-bold text-lg">{meanITA != null ? `${meanITA.toFixed(1)}°` : "—"}</div>
+                <div className="text-xs text-muted-foreground">suma |Δθ| a lo largo del eje</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">Score Clínico</div>
@@ -288,15 +319,14 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {data.individual_tortuosities.map((value, index) => {
-                    const g = glands[index];
+                  {tableRows.map(({ g, legacyTort: value }, index) => {
                     const icmN = toFiniteNumber(g?.ICM);
                     const itaN = toFiniteNumber(g?.ITA_deg);
                     const scoreN = toFiniteNumber(g?.tortuosity_score);
                     const grade = g?.tortuosity_grade ?? (value <= 0.1 ? "Normal" : value <= 0.2 ? "Leve" : "Severa");
                     const gradeStyle = getGradeStyle(grade);
                     return (
-                      <TableRow key={index}>
+                      <TableRow key={g?.gland_id ?? index}>
                         <TableCell className="font-medium text-xs sm:text-sm">{g?.gland_id ?? `G${index + 1}`}</TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {icmN != null ? icmN.toFixed(4) : value.toFixed(3)}
@@ -306,12 +336,12 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {calibrated
-                            ? (g?.length_um?.toFixed(0) ?? "—")
+                            ? (g?.length_um != null ? Number(g.length_um).toFixed(0) : "—")
                             : (data.individual_lengths?.[index]?.toFixed(1) ?? "—")}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {calibrated
-                            ? (g?.thickness_um?.toFixed(0) ?? "—")
+                            ? (g?.thickness_um != null ? Number(g.thickness_um).toFixed(0) : "—")
                             : (data.individual_thicknesses?.[index]?.toFixed(1) ?? "—")}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm">
