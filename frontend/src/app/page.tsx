@@ -108,6 +108,7 @@ export default function DashboardPage() {
   const [convertToGray, setConvertToGray] = useState(true);
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
   const [umPerPx, setUmPerPx] = useState<number>(1.0);
+  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "panoptic">("maskrcnn");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -221,7 +222,8 @@ export default function DashboardPage() {
       formData.append("file", fileToAnalyze);
       formData.append("um_per_px", umPerPx.toString());
 
-      const response = await fetch("/api/analyze", {
+      const endpoint = segmentationModel === "panoptic" ? "/api/analyze-panoptic" : "/api/analyze";
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -656,9 +658,43 @@ export default function DashboardPage() {
                       </p>
                     </div>
 
+                    {/* Selector de modelo de segmentación */}
+                    <div className="flex flex-col items-center space-y-2 w-full">
+                      <Label className="text-sm font-medium">Modelo de segmentación</Label>
+                      <div className="flex rounded-md border border-border overflow-hidden w-full max-w-sm">
+                        <button
+                          type="button"
+                          onClick={() => setSegmentationModel("maskrcnn")}
+                          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                            segmentationModel === "maskrcnn"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-background text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          Mask R-CNN
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSegmentationModel("panoptic")}
+                          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+                            segmentationModel === "panoptic"
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-background text-muted-foreground hover:bg-muted"
+                          }`}
+                        >
+                          Mask2Former
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground text-center">
+                        {segmentationModel === "panoptic"
+                          ? "Mask2Former — segmentación panóptica de glándulas"
+                          : "Mask R-CNN — detección de instancias clásica"}
+                      </p>
+                    </div>
+
                     <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                      <Button 
-                        onClick={analyzeImage} 
+                      <Button
+                        onClick={analyzeImage}
                         disabled={isAnalyzing}
                         className="flex-1"
                       >

@@ -471,12 +471,12 @@ def calculate_gland_tortuosity(mask):
 # ------------------------------------------------------
 # Función de visualización y combinación final
 # ------------------------------------------------------
-def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, device, um_per_px: float = 1.0):
-    # Usar modelos ya cargados (no cargar de nuevo)
-
-    # Predicción de la máscara de instancias (glándulas de Meibomio)
-    pred_instance = predict_maskrcnn_model(maskrcnn_model, image_path, device)
-
+def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0):
+    """
+    Runs the full tortuosity pipeline given a pre-computed instance map.
+    pred_instance: HxW int32 numpy array (0=background, 1..N=gland ids).
+    Used by both Mask R-CNN and Mask2Former (panoptic) backends.
+    """
     # Predicción de la máscara del contorno del párpado (Tarsus) con modelo mejorado
     original_image, mask_tarsus = predict_unet_model(unet_model, image_path, device, use_clahe=True, use_tta=True)
 
@@ -609,6 +609,12 @@ def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, dev
         'dominant_grade': dominant_grade,
         'individual_glands': pipeline_results,
     }
+
+
+def show_combined_result_with_models(image_path, maskrcnn_model, unet_model, device, um_per_px: float = 1.0):
+    pred_instance = predict_maskrcnn_model(maskrcnn_model, image_path, device)
+    return compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px)
+
 
 def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, device):
     # Cargar modelos

@@ -25,9 +25,12 @@ from Tortuosity import (
     predict_unet_model,
     show_combined_result,
     show_combined_result_with_models,
+    compute_results_from_instance_map,
     resize_to_previous_multiple_of_32,
     device
 )
+from panoptic import build_model as build_panoptic_model, load_checkpoint as load_panoptic_checkpoint, predict_panoptic_in_memory
+from transformers import AutoImageProcessor
 
 # Create FastAPI app
 app = FastAPI(
@@ -74,10 +77,15 @@ FALLBACK_UNET_PATHS = [
     "final_model_tarsus.pth"               # Último recurso
 ]
 
+PANOPTIC_CKPT_PATH = "best_model (13).pth"
+PANOPTIC_MODEL_ID = "facebook/mask2former-swin-small-cityscapes-instance"
+
 # Global model instances (loaded once at startup)
 maskrcnn_model = None
 unet_model = None
 meibomio_model = None  # MGDA model for meibomian glands
+panoptic_model = None
+panoptic_processor = None
 
 def try_load_model_with_fallbacks(load_function, model_paths, model_name):
     """Try to load a model from multiple possible paths"""
@@ -134,7 +142,7 @@ def clahe_like_imagej(img, block_radius=63, bins=255, slope=3.0, convert_to_gray
 @app.on_event("startup")
 async def startup_event():
     """Load models on startup"""
-    global maskrcnn_model, unet_model, meibomio_model
+    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor
     try:
         print("Starting model loading process...")
         print(f"Mask R-CNN model path: {MASK_RCNN_MODEL_PATH}")
@@ -214,6 +222,23 @@ async def startup_event():
             print(f"⚠ Failed to load MGDA meibomian model: {e}")
             meibomio_model = None
         
+        # Load Mask2Former panoptic model
+        try:
+            print("Loading Mask2Former (panoptic) model...")
+            if os.path.exists(PANOPTIC_CKPT_PATH):
+                _pan = build_panoptic_model()
+                _pan = load_panoptic_checkpoint(_pan, PANOPTIC_CKPT_PATH, device)
+                _pan.to(device).eval()
+                panoptic_model = _pan
+                panoptic_processor = AutoImageProcessor.from_pretrained(PANOPTIC_MODEL_ID, use_fast=False)
+                print("✓ Mask2Former (panoptic) model loaded successfully")
+            else:
+                print(f"✗ Panoptic checkpoint not found: {PANOPTIC_CKPT_PATH}")
+        except Exception as e:
+            print(f"⚠ Failed to load panoptic model: {e}")
+            panoptic_model = None
+            panoptic_processor = None
+
         if maskrcnn_model is not None and unet_model is not None:
             print("✓ All models loaded successfully!")
         else:
@@ -334,13 +359,14 @@ async def api_info():
 async def health_check():
     """Health check endpoint"""
     models_loaded = (maskrcnn_model is not None) and (unet_model is not None) and (meibomio_model is not None)
-    
+
     return {
         "status": "healthy" if models_loaded else "degraded",
         "models_loaded": {
             "maskrcnn": maskrcnn_model is not None,
             "unet": unet_model is not None,
-            "meibomio": meibomio_model is not None
+            "meibomio": meibomio_model is not None,
+            "panoptic": panoptic_model is not None,
         },
         "device": str(device),
         "message": "Models loaded successfully" if models_loaded else "Some models failed to load"
@@ -365,6 +391,10 @@ async def model_status():
                 "status": "loaded" if meibomio_model is not None else "failed",
                 "path": "final_model_improved_fixed.pth",
                 "fallback_paths": ["final_model_improved_fixed.pth"]
+            },
+            "panoptic": {
+                "status": "loaded" if panoptic_model is not None else "failed",
+                "path": PANOPTIC_CKPT_PATH,
             }
         },
         "device": str(device),
@@ -507,6 +537,105 @@ async def analyze_image(
             status_code=500, 
             detail=f"Analysis failed: {str(e)}"
         )
+
+@app.post("/analyze-panoptic")
+async def analyze_panoptic(
+    file: UploadFile = File(...),
+    um_per_px: float = Form(1.0),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Analyze an uploaded image using Mask2Former (panoptic) for gland segmentation.
+    Same response format as /analyze.
+    """
+    if panoptic_model is None or panoptic_processor is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "Panoptic model not loaded",
+                "message": f"Checkpoint '{PANOPTIC_CKPT_PATH}' may be missing or failed to load.",
+            }
+        )
+    if unet_model is None:
+        raise HTTPException(status_code=503, detail="UNet (tarsus) model not loaded")
+
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    allowed_extensions = {".jpg", ".jpeg", ".png"}
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Extension {file_extension} not allowed")
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            temp_file_path = tmp.name
+
+        img_np = np.array(Image.open(temp_file_path).convert("RGB"))
+        pred_instance, _ = predict_panoptic_in_memory(img_np, panoptic_model, panoptic_processor, device)
+
+        result_image, tortuosity_data = compute_results_from_instance_map(
+            pred_instance, temp_file_path, unet_model, device, um_per_px=um_per_px
+        )
+
+        img_buffer = io.BytesIO()
+        result_image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+        binary_mask = tortuosity_data.get('binary_mask_glands')
+        binary_mask_base64 = None
+        if binary_mask is not None:
+            mask_image = Image.fromarray((binary_mask * 255).astype(np.uint8), mode='L')
+            mask_buffer = io.BytesIO()
+            mask_image.save(mask_buffer, format='PNG')
+            mask_buffer.seek(0)
+            binary_mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+
+        background_tasks.add_task(os.unlink, temp_file_path) if background_tasks else os.unlink(temp_file_path)
+
+        individual_tortuosities = tortuosity_data['individual_tortuosities']
+        individual_lengths = tortuosity_data.get('individual_lengths', [])
+        individual_thicknesses = tortuosity_data.get('individual_thicknesses', [])
+
+        return jsonable_encoder({
+            "success": True,
+            "message": "Panoptic analysis completed successfully",
+            "data": {
+                "processed_image": f"data:image/png;base64,{img_base64}",
+                "avg_tortuosity": round(tortuosity_data['avg_tortuosity'], 3),
+                "num_glands": tortuosity_data['num_glands'],
+                "individual_tortuosities": [round(t, 3) for t in individual_tortuosities],
+                "avg_length_px": round(tortuosity_data.get('avg_length_px', 0.0), 1),
+                "avg_thickness_px": round(tortuosity_data.get('avg_thickness_px', 0.0), 1),
+                "individual_lengths": [round(l, 1) for l in individual_lengths],
+                "individual_thicknesses": [round(t, 1) for t in individual_thicknesses],
+                "binary_mask_glands": f"data:image/png;base64,{binary_mask_base64}" if binary_mask_base64 else None,
+                "analysis_info": {
+                    "total_glands_analyzed": len(individual_tortuosities),
+                    "tortuosity_range": {
+                        "min": round(min(individual_tortuosities), 3) if individual_tortuosities else 0,
+                        "max": round(max(individual_tortuosities), 3) if individual_tortuosities else 0,
+                    },
+                },
+                "um_per_px": tortuosity_data.get('um_per_px', 1.0),
+                "avg_length_um": tortuosity_data.get('avg_length_um', 0.0),
+                "avg_thickness_um": tortuosity_data.get('avg_thickness_um', 0.0),
+                "avg_ICM": tortuosity_data.get('avg_ICM', 0.0),
+                "avg_ITA_deg": tortuosity_data.get('avg_ITA_deg', 0.0),
+                "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
+                "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
+                "individual_glands": tortuosity_data.get('individual_glands', []),
+            }
+        })
+
+    except Exception as e:
+        if 'temp_file_path' in locals() and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+        import traceback
+        raise HTTPException(status_code=500, detail=f"Panoptic analysis failed: {str(e)}")
+
 
 @app.post("/apply-clahe")
 async def apply_clahe_filter(
