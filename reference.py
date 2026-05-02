@@ -281,7 +281,7 @@ def predict_single_image(
     # Inferencia
     pixel_values = img_tensor.unsqueeze(0).to(device)
 
-    with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
+    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
         outputs = model(pixel_values=pixel_values)
 
     # Post-process de instance segmentation
@@ -372,56 +372,6 @@ def predict_single_image(
             )
 
     return pred_instance, summary
-
-
-# ============================================================
-# INFERENCIA EN MEMORIA (para integración con el backend)
-# ============================================================
-
-@torch.no_grad()
-def predict_panoptic_in_memory(
-    img_np,
-    model,
-    processor,
-    device,
-    score_threshold=INSTANCE_SCORE_THRESHOLD,
-    mask_threshold=INSTANCE_MASK_THRESHOLD,
-):
-    """
-    Run Mask2Former inference on a numpy RGB uint8 image.
-    Returns (pred_instance HxW int32, kept_segments list).
-    No file I/O — for use in the FastAPI backend.
-    """
-    H_crop, W_crop = img_np.shape[:2]
-
-    # Same preprocessing as training: resize to 512x512, ImageNet normalize
-    img_resized = cv2.resize(img_np, OUTPUT_SIZE, interpolation=cv2.INTER_LINEAR)
-    t = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
-    ])
-    img_tensor = t(Image.fromarray(img_resized.astype(np.uint8)))
-
-    pixel_values = img_tensor.unsqueeze(0).to(device)
-    with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
-        outputs = model(pixel_values=pixel_values)
-
-    # Let the processor resize logits → binary masks via bilinear interpolation
-    # (cleaner than INTER_NEAREST on a discrete label map, avoids staircase artifacts)
-    inst = processor.post_process_instance_segmentation(
-        outputs,
-        target_sizes=[(H_crop, W_crop)],
-        threshold=score_threshold,
-        mask_threshold=mask_threshold,
-    )[0]
-
-    pred_instance, _, kept_segments = parse_instance_output(
-        inst, H_crop, W_crop,
-        score_threshold=score_threshold,
-        min_area=MIN_INSTANCE_AREA,
-    )
-
-    return pred_instance, kept_segments
 
 
 # ============================================================

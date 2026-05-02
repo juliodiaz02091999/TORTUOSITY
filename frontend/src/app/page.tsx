@@ -9,6 +9,7 @@ import { UploadZone } from "@/components/upload-zone";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { ResultsDisplay } from "@/components/results-display";
+import { MaskDrawer } from "@/components/mask-drawer";
 import { PhotoManager } from "@/components/photo-manager";
 import { DiceValidation } from "@/components/dice-validation";
 import { StoredPhoto } from "@/lib/photo-storage";
@@ -108,7 +109,9 @@ export default function DashboardPage() {
   const [convertToGray, setConvertToGray] = useState(true);
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
   const [umPerPx, setUmPerPx] = useState<number>(1.0);
-  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "panoptic">("maskrcnn");
+  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "panoptic">("maskrcnn");
+  const [contourMask, setContourMask] = useState<string | null>(null);
+  const [showMaskDrawer, setShowMaskDrawer] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -157,6 +160,7 @@ export default function DashboardPage() {
     setResults(null);
     setMgdaResult(null);
     setClaheImage(null);
+    setContourMask(null);
   };
 
   const handleCapturedPhotoSelect = (photo: StoredPhoto) => {
@@ -222,7 +226,15 @@ export default function DashboardPage() {
       formData.append("file", fileToAnalyze);
       formData.append("um_per_px", umPerPx.toString());
 
-      const endpoint = segmentationModel === "panoptic" ? "/api/analyze-panoptic" : "/api/analyze";
+      if ((segmentationModel === "panoptic" || segmentationModel === "maskrcnn2") && contourMask) {
+        const maskBlob = await fetch(contourMask).then(r => r.blob());
+        formData.append("contour_mask", new File([maskBlob], "contour_mask.png", { type: "image/png" }));
+      }
+
+      const endpoint =
+        segmentationModel === "panoptic" ? "/api/analyze-panoptic"
+        : segmentationModel === "maskrcnn2" ? "/api/analyze-maskrcnn2"
+        : "/api/analyze";
       const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
@@ -662,35 +674,58 @@ export default function DashboardPage() {
                     <div className="flex flex-col items-center space-y-2 w-full">
                       <Label className="text-sm font-medium">Modelo de segmentación</Label>
                       <div className="flex rounded-md border border-border overflow-hidden w-full max-w-sm">
-                        <button
-                          type="button"
-                          onClick={() => setSegmentationModel("maskrcnn")}
-                          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                            segmentationModel === "maskrcnn"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-background text-muted-foreground hover:bg-muted"
-                          }`}
-                        >
-                          Mask R-CNN
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSegmentationModel("panoptic")}
-                          className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                            segmentationModel === "panoptic"
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-background text-muted-foreground hover:bg-muted"
-                          }`}
-                        >
-                          Mask2Former
-                        </button>
+                        {(["maskrcnn", "maskrcnn2", "panoptic"] as const).map((m, i) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => { setSegmentationModel(m); setContourMask(null); }}
+                            className={`flex-1 px-2 py-2 text-xs font-medium transition-colors border-l first:border-l-0 border-border ${
+                              segmentationModel === m
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-background text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            {m === "maskrcnn" ? "Mask R-CNN v1" : m === "maskrcnn2" ? "Mask R-CNN v2" : "Mask2Former"}
+                          </button>
+                        ))}
                       </div>
                       <p className="text-xs text-muted-foreground text-center">
                         {segmentationModel === "panoptic"
-                          ? "Mask2Former — segmentación panóptica de glándulas"
-                          : "Mask R-CNN — detección de instancias clásica"}
+                          ? "Mask2Former — segmentación panóptica (best_model 13)"
+                          : segmentationModel === "maskrcnn2"
+                          ? "Mask R-CNN v2 — CLAHE LAB + EXIF + contorno (best_model 17)"
+                          : "Mask R-CNN v1 — detección de instancias clásica (final_model 11)"}
                       </p>
                     </div>
+
+                    {/* Contour mask drawing — for Mask2Former and Mask R-CNN v2 */}
+                    {(segmentationModel === "panoptic" || segmentationModel === "maskrcnn2") && (selectedFile || selectedCapturedPhoto) && (
+                      <div className="flex flex-col items-center space-y-1 w-full">
+                        <div className="flex gap-2 items-center">
+                          <button
+                            type="button"
+                            onClick={() => setShowMaskDrawer(true)}
+                            className="text-xs px-3 py-1.5 rounded-md border border-border hover:bg-muted transition-colors"
+                          >
+                            ✏️ {contourMask ? "Redibujar contorno" : "Dibujar contorno del párpado"}
+                          </button>
+                          {contourMask && (
+                            <button
+                              type="button"
+                              onClick={() => setContourMask(null)}
+                              className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                              ✕ Quitar
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground text-center">
+                          {contourMask
+                            ? "Contorno manual activo — se usará en lugar del UNet"
+                            : "Opcional — sin contorno se usa la predicción UNet"}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex flex-col sm:flex-row gap-2 justify-center">
                       <Button
@@ -961,6 +996,21 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {showMaskDrawer && (selectedFile || selectedCapturedPhoto) && (
+        <MaskDrawer
+          imageUrl={
+            selectedFile
+              ? URL.createObjectURL(selectedFile)
+              : selectedCapturedPhoto!.dataUrl
+          }
+          onConfirm={(maskDataUrl) => {
+            setContourMask(maskDataUrl);
+            setShowMaskDrawer(false);
+          }}
+          onClose={() => setShowMaskDrawer(false)}
+        />
+      )}
     </div>
   );
 }

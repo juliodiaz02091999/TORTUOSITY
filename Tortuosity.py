@@ -471,14 +471,19 @@ def calculate_gland_tortuosity(mask):
 # ------------------------------------------------------
 # Función de visualización y combinación final
 # ------------------------------------------------------
-def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0):
+def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0, precomputed_tarsus=None):
     """
     Runs the full tortuosity pipeline given a pre-computed instance map.
     pred_instance: HxW int32 numpy array (0=background, 1..N=gland ids).
-    Used by both Mask R-CNN and Mask2Former (panoptic) backends.
+    precomputed_tarsus: optional HxW float32/uint8 numpy array (0/1). When
+        provided (e.g. user-drawn contour or already-run UNet), UNet is skipped.
     """
-    # Predicción de la máscara del contorno del párpado (Tarsus) con modelo mejorado
-    original_image, mask_tarsus = predict_unet_model(unet_model, image_path, device, use_clahe=True, use_tta=True)
+    if precomputed_tarsus is not None:
+        original_image = Image.open(image_path).convert("RGB")
+        import torch as _torch
+        mask_tarsus = _torch.from_numpy(precomputed_tarsus.astype(np.float32)).unsqueeze(0)
+    else:
+        original_image, mask_tarsus = predict_unet_model(unet_model, image_path, device, use_clahe=True, use_tta=True)
 
     # Redimensionar la máscara de Tarsus a las dimensiones de la máscara de instancias
     mask_tarsus_resized = F.interpolate(mask_tarsus.unsqueeze(0), size=pred_instance.shape, mode='bilinear', align_corners=True)
