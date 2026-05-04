@@ -40,14 +40,17 @@ RUN if [ -f ".gitattributes" ] && grep -q "\.pth.*lfs" .gitattributes; then \
         ls -la *.pth; \
     fi
 
-# Pre-cache Mask2Former base model from HuggingFace (needed for panoptic at runtime)
+# Fix HuggingFace cache to a path inside /app so it persists in the image
+ENV HF_HOME=/app/hf_cache
+
+# Pre-cache Mask2Former base model during build (same HF_HOME used at runtime)
 RUN python -c "\
 from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerConfig, AutoImageProcessor; \
-print('Downloading Mask2Former config and processor...'); \
+print('Caching Mask2Former processor...'); \
 AutoImageProcessor.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_fast=False); \
-print('Downloading Mask2Former base weights...'); \
+print('Caching Mask2Former weights...'); \
 Mask2FormerForUniversalSegmentation.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_safetensors=True, low_cpu_mem_usage=True); \
-print('HuggingFace model cached successfully') \
+print('Done — HF_HOME=/app/hf_cache') \
 "
 
 # Create necessary directories
