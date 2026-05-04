@@ -40,17 +40,17 @@ RUN if [ -f ".gitattributes" ] && grep -q "\.pth.*lfs" .gitattributes; then \
         ls -la *.pth; \
     fi
 
-# Fix HuggingFace cache to a path inside /app so it persists in the image
-ENV HF_HOME=/app/hf_cache
-
-# Pre-cache Mask2Former base model during build (same HF_HOME used at runtime)
+# Save Mask2Former config + processor locally (no large weights needed — our checkpoint provides them)
 RUN python -c "\
-from transformers import Mask2FormerForUniversalSegmentation, Mask2FormerConfig, AutoImageProcessor; \
-print('Caching Mask2Former processor...'); \
-AutoImageProcessor.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_fast=False); \
-print('Caching Mask2Former weights...'); \
-Mask2FormerForUniversalSegmentation.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_safetensors=True, low_cpu_mem_usage=True); \
-print('Done — HF_HOME=/app/hf_cache') \
+import os; os.makedirs('/app/mask2former_config', exist_ok=True); \
+from transformers import Mask2FormerConfig, AutoImageProcessor; \
+print('Downloading Mask2Former config...'); \
+cfg = Mask2FormerConfig.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance'); \
+cfg.save_pretrained('/app/mask2former_config'); \
+print('Downloading processor...'); \
+proc = AutoImageProcessor.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_fast=False); \
+proc.save_pretrained('/app/mask2former_config'); \
+print('Saved to /app/mask2former_config') \
 "
 
 # Create necessary directories

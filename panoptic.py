@@ -42,21 +42,24 @@ DEFAULT_CKPT = "best_model.pth"
 # MODELO
 # ============================================================
 
+_LOCAL_CONFIG = "/app/mask2former_config"
+
 def build_model():
-    config = Mask2FormerConfig.from_pretrained(MODEL_ID)
+    # Use locally saved config if available (Cloud Run — no internet at runtime).
+    # Otherwise fall back to downloading from HuggingFace (local dev).
+    _local = os.path.isdir(_LOCAL_CONFIG)
+    _src = _LOCAL_CONFIG if _local else MODEL_ID
+
+    config = Mask2FormerConfig.from_pretrained(_src, local_files_only=_local)
     config.num_labels = 2
     config.num_queries = NUM_QUERIES
     config.id2label = ID2LABEL
     config.label2id = LABEL2ID
     config.is_thing_map = {0: False, 1: True}
 
-    model = Mask2FormerForUniversalSegmentation.from_pretrained(
-        MODEL_ID,
-        config=config,
-        ignore_mismatched_sizes=True,
-        use_safetensors=True,
-        low_cpu_mem_usage=True,
-    )
+    # Initialize from config only — weights are loaded by load_checkpoint(),
+    # so we don't need to download HuggingFace pretrained weights here.
+    model = Mask2FormerForUniversalSegmentation(config)
 
     model.config.id2label = ID2LABEL
     model.config.label2id = LABEL2ID

@@ -238,7 +238,11 @@ async def startup_event():
                 _pan = load_panoptic_checkpoint(_pan, PANOPTIC_CKPT_PATH, device)
                 _pan.to(device).eval()
                 panoptic_model = _pan
-                panoptic_processor = AutoImageProcessor.from_pretrained(PANOPTIC_MODEL_ID, use_fast=False)
+                _local_cfg = "/app/mask2former_config"
+                _proc_src = _local_cfg if os.path.isdir(_local_cfg) else PANOPTIC_MODEL_ID
+                panoptic_processor = AutoImageProcessor.from_pretrained(
+                    _proc_src, use_fast=False, local_files_only=os.path.isdir(_local_cfg)
+                )
                 print("✓ Mask2Former (panoptic) model loaded successfully")
             else:
                 print(f"✗ Panoptic checkpoint not found: {PANOPTIC_CKPT_PATH}")
