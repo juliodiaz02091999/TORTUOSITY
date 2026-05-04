@@ -255,7 +255,7 @@ async def startup_event():
                 _m2 = maskrcnn_v2.build_model(pretrained=False)
                 try:
                     _state = _torch.load(MASKRCNN2_CKPT_PATH, map_location=device, weights_only=True)
-                except TypeError:
+                except Exception:
                     _state = _torch.load(MASKRCNN2_CKPT_PATH, map_location=device)
                 _state = maskrcnn_v2._normalize_state_dict(_state)
                 _m2.load_state_dict(_state, strict=True)
@@ -276,7 +276,7 @@ async def startup_event():
                 _m3 = maskrcnn_v3.build_model(pretrained=False)
                 try:
                     _state3 = _torch.load(MASKRCNN3_CKPT_PATH, map_location=device, weights_only=True)
-                except TypeError:
+                except Exception:
                     _state3 = _torch.load(MASKRCNN3_CKPT_PATH, map_location=device)
                 _state3 = maskrcnn_v3._normalize_state_dict(_state3)
                 _m3.load_state_dict(_state3, strict=True)
@@ -297,7 +297,7 @@ async def startup_event():
                 _m4 = maskrcnn_v3.build_model(pretrained=False)
                 try:
                     _state4 = _torch.load(MASKRCNN4_CKPT_PATH, map_location=device, weights_only=True)
-                except TypeError:
+                except Exception:
                     _state4 = _torch.load(MASKRCNN4_CKPT_PATH, map_location=device)
                 _state4 = maskrcnn_v3._normalize_state_dict(_state4)
                 _m4.load_state_dict(_state4, strict=True)
