@@ -109,7 +109,7 @@ export default function DashboardPage() {
   const [convertToGray, setConvertToGray] = useState(true);
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
   const [umPerPx, setUmPerPx] = useState<number>(1.0);
-  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "panoptic">("maskrcnn");
+  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "maskrcnn3" | "maskrcnn4" | "panoptic">("maskrcnn");
   const [contourMask, setContourMask] = useState<string | null>(null);
   const [showMaskDrawer, setShowMaskDrawer] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -226,14 +226,16 @@ export default function DashboardPage() {
       formData.append("file", fileToAnalyze);
       formData.append("um_per_px", umPerPx.toString());
 
-      if ((segmentationModel === "panoptic" || segmentationModel === "maskrcnn2") && contourMask) {
+      if ((segmentationModel === "panoptic" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && contourMask) {
         const maskBlob = await fetch(contourMask).then(r => r.blob());
         formData.append("contour_mask", new File([maskBlob], "contour_mask.png", { type: "image/png" }));
       }
 
       const endpoint =
-        segmentationModel === "panoptic" ? "/api/analyze-panoptic"
+        segmentationModel === "panoptic"    ? "/api/analyze-panoptic"
         : segmentationModel === "maskrcnn2" ? "/api/analyze-maskrcnn2"
+        : segmentationModel === "maskrcnn3" ? "/api/analyze-maskrcnn3"
+        : segmentationModel === "maskrcnn4" ? "/api/analyze-maskrcnn4"
         : "/api/analyze";
       const response = await fetch(endpoint, {
         method: "POST",
@@ -674,7 +676,7 @@ export default function DashboardPage() {
                     <div className="flex flex-col items-center space-y-2 w-full">
                       <Label className="text-sm font-medium">Modelo de segmentación</Label>
                       <div className="flex rounded-md border border-border overflow-hidden w-full max-w-sm">
-                        {(["maskrcnn", "maskrcnn2", "panoptic"] as const).map((m, i) => (
+                        {(["maskrcnn", "maskrcnn2", "maskrcnn3", "maskrcnn4", "panoptic"] as const).map((m) => (
                           <button
                             key={m}
                             type="button"
@@ -685,7 +687,7 @@ export default function DashboardPage() {
                                 : "bg-background text-muted-foreground hover:bg-muted"
                             }`}
                           >
-                            {m === "maskrcnn" ? "Mask R-CNN v1" : m === "maskrcnn2" ? "Mask R-CNN v2" : "Mask2Former"}
+                            {m === "maskrcnn" ? "R-CNN v1" : m === "maskrcnn2" ? "R-CNN v2" : m === "maskrcnn3" ? "R-CNN v3" : m === "maskrcnn4" ? "R-CNN v4" : "Mask2Former"}
                           </button>
                         ))}
                       </div>
@@ -693,13 +695,17 @@ export default function DashboardPage() {
                         {segmentationModel === "panoptic"
                           ? "Mask2Former — segmentación panóptica (best_model 13)"
                           : segmentationModel === "maskrcnn2"
-                          ? "Mask R-CNN v2 — CLAHE LAB + EXIF + contorno (best_model 17)"
-                          : "Mask R-CNN v1 — detección de instancias clásica (final_model 11)"}
+                          ? "Mask R-CNN v2 — CLAHE LAB + EXIF (best_model 17)"
+                          : segmentationModel === "maskrcnn3"
+                          ? "Mask R-CNN v3 — CLAHE LAB + EXIF (best_model 18)"
+                          : segmentationModel === "maskrcnn4"
+                          ? "Mask R-CNN v4 — CLAHE LAB + EXIF (best_model 20)"
+                          : "Mask R-CNN v1 — detección clásica (final_model 11)"}
                       </p>
                     </div>
 
                     {/* Contour mask drawing — for Mask2Former and Mask R-CNN v2 */}
-                    {(segmentationModel === "panoptic" || segmentationModel === "maskrcnn2") && (selectedFile || selectedCapturedPhoto) && (
+                    {(segmentationModel === "panoptic" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && (selectedFile || selectedCapturedPhoto) && (
                       <div className="flex flex-col items-center space-y-1 w-full">
                         <div className="flex gap-2 items-center">
                           <button

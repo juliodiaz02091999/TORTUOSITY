@@ -32,6 +32,7 @@ from Tortuosity import (
 from panoptic import build_model as build_panoptic_model, load_checkpoint as load_panoptic_checkpoint, predict_panoptic_in_memory
 from transformers import AutoImageProcessor
 import maskcrnn as maskrcnn_v2
+import maskcrnnv3 as maskrcnn_v3
 
 # Create FastAPI app
 app = FastAPI(
@@ -81,6 +82,8 @@ FALLBACK_UNET_PATHS = [
 PANOPTIC_CKPT_PATH = "best_model (13).pth"
 PANOPTIC_MODEL_ID = "facebook/mask2former-swin-small-cityscapes-instance"
 MASKRCNN2_CKPT_PATH = "best_model (17).pth"
+MASKRCNN3_CKPT_PATH = "best_model (18).pth"
+MASKRCNN4_CKPT_PATH = "best_model (20).pth"
 
 # Global model instances (loaded once at startup)
 maskrcnn_model = None
@@ -89,6 +92,8 @@ meibomio_model = None
 panoptic_model = None
 panoptic_processor = None
 maskrcnn2_model = None
+maskrcnn3_model = None
+maskrcnn4_model = None
 
 def try_load_model_with_fallbacks(load_function, model_paths, model_name):
     """Try to load a model from multiple possible paths"""
@@ -145,7 +150,7 @@ def clahe_like_imagej(img, block_radius=63, bins=255, slope=3.0, convert_to_gray
 @app.on_event("startup")
 async def startup_event():
     """Load models on startup"""
-    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model
+    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model, maskrcnn3_model, maskrcnn4_model
     try:
         print("Starting model loading process...")
         print(f"Mask R-CNN model path: {MASK_RCNN_MODEL_PATH}")
@@ -262,6 +267,48 @@ async def startup_event():
         except Exception as e:
             print(f"⚠ Failed to load Mask R-CNN v2 model: {e}")
             maskrcnn2_model = None
+
+        # Load Mask R-CNN v3 (maskcrnnv3.py — best_model 18)
+        try:
+            print("Loading Mask R-CNN v3 model...")
+            if os.path.exists(MASKRCNN3_CKPT_PATH):
+                import torch as _torch
+                _m3 = maskrcnn_v3.build_model(pretrained=False)
+                try:
+                    _state3 = _torch.load(MASKRCNN3_CKPT_PATH, map_location=device, weights_only=True)
+                except TypeError:
+                    _state3 = _torch.load(MASKRCNN3_CKPT_PATH, map_location=device)
+                _state3 = maskrcnn_v3._normalize_state_dict(_state3)
+                _m3.load_state_dict(_state3, strict=True)
+                _m3.to(device).eval()
+                maskrcnn3_model = _m3
+                print("✓ Mask R-CNN v3 model loaded successfully")
+            else:
+                print(f"✗ Mask R-CNN v3 checkpoint not found: {MASKRCNN3_CKPT_PATH}")
+        except Exception as e:
+            print(f"⚠ Failed to load Mask R-CNN v3 model: {e}")
+            maskrcnn3_model = None
+
+        # Load Mask R-CNN v4 (maskcrnnv3 architecture — best_model 20)
+        try:
+            print("Loading Mask R-CNN v4 model...")
+            if os.path.exists(MASKRCNN4_CKPT_PATH):
+                import torch as _torch
+                _m4 = maskrcnn_v3.build_model(pretrained=False)
+                try:
+                    _state4 = _torch.load(MASKRCNN4_CKPT_PATH, map_location=device, weights_only=True)
+                except TypeError:
+                    _state4 = _torch.load(MASKRCNN4_CKPT_PATH, map_location=device)
+                _state4 = maskrcnn_v3._normalize_state_dict(_state4)
+                _m4.load_state_dict(_state4, strict=True)
+                _m4.to(device).eval()
+                maskrcnn4_model = _m4
+                print("✓ Mask R-CNN v4 model loaded successfully")
+            else:
+                print(f"✗ Mask R-CNN v4 checkpoint not found: {MASKRCNN4_CKPT_PATH}")
+        except Exception as e:
+            print(f"⚠ Failed to load Mask R-CNN v4 model: {e}")
+            maskrcnn4_model = None
 
         if maskrcnn_model is not None and unet_model is not None:
             print("✓ All models loaded successfully!")
@@ -392,6 +439,8 @@ async def health_check():
             "meibomio": meibomio_model is not None,
             "panoptic": panoptic_model is not None,
             "maskrcnn2": maskrcnn2_model is not None,
+            "maskrcnn3": maskrcnn3_model is not None,
+            "maskrcnn4": maskrcnn4_model is not None,
         },
         "device": str(device),
         "message": "Models loaded successfully" if models_loaded else "Some models failed to load"
@@ -424,6 +473,14 @@ async def model_status():
             "maskrcnn2": {
                 "status": "loaded" if maskrcnn2_model is not None else "failed",
                 "path": MASKRCNN2_CKPT_PATH,
+            },
+            "maskrcnn3": {
+                "status": "loaded" if maskrcnn3_model is not None else "failed",
+                "path": MASKRCNN3_CKPT_PATH,
+            },
+            "maskrcnn4": {
+                "status": "loaded" if maskrcnn4_model is not None else "failed",
+                "path": MASKRCNN4_CKPT_PATH,
             },
         },
         "device": str(device),
@@ -595,10 +652,26 @@ async def analyze_maskrcnn2(
             shutil.copyfileobj(file.file, tmp)
             temp_file_path = tmp.name
 
-        # Optional user-drawn contour mask
+        # Resolve contour: user-drawn mask OR UNet fallback (same as panoptic endpoint)
+        H_orig, W_orig = np.array(Image.open(temp_file_path).convert("RGB")).shape[:2]
         if contour_mask is not None and contour_mask.filename:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
                 shutil.copyfileobj(contour_mask.file, ctmp)
+                contour_tmp_path = ctmp.name
+            contour_arr = np.array(
+                Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST)
+            )
+            tarsus_bin = (contour_arr > 0).astype(np.float32)
+        else:
+            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            mask_np = mask_tarsus.squeeze().numpy()
+            mask_full = np.array(
+                Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
+            )
+            tarsus_bin = (mask_full > 127).astype(np.float32)
+            unet_mask_img = Image.fromarray((tarsus_bin * 255).astype(np.uint8))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                unet_mask_img.save(ctmp.name)
                 contour_tmp_path = ctmp.name
 
         pred_instance = maskrcnn_v2.infer_with_model(
@@ -607,16 +680,6 @@ async def analyze_maskrcnn2(
             device=device,
             contour_path=contour_tmp_path,
         )
-
-        # Build tarsus mask for tortuosity pipeline
-        if contour_tmp_path is not None:
-            H_orig, W_orig = np.array(Image.open(temp_file_path).convert("RGB")).shape[:2]
-            contour_arr = np.array(
-                Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST)
-            )
-            tarsus_bin = (contour_arr > 0).astype(np.float32)
-        else:
-            tarsus_bin = None  # compute_results_from_instance_map will run UNet
 
         result_image, tortuosity_data = compute_results_from_instance_map(
             pred_instance, temp_file_path, unet_model, device,
@@ -689,6 +752,262 @@ async def analyze_maskrcnn2(
         tb = traceback.format_exc()
         print(f"[MASKRCNN2] ERROR: {e}\n{tb}")
         raise HTTPException(status_code=500, detail=f"Mask R-CNN v2 analysis failed: {str(e)}")
+
+
+@app.post("/analyze-maskrcnn3")
+async def analyze_maskrcnn3(
+    file: UploadFile = File(...),
+    um_per_px: float = Form(1.0),
+    contour_mask: Optional[UploadFile] = File(None),
+    background_tasks: BackgroundTasks = None
+):
+    """Mask R-CNN v3 — best_model (18).pth"""
+    if maskrcnn3_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Mask R-CNN v3 not loaded", "message": f"Checkpoint '{MASKRCNN3_CKPT_PATH}' missing or failed."}
+        )
+
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    allowed_extensions = {".jpg", ".jpeg", ".png"}
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Extension {file_extension} not allowed")
+
+    contour_tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            temp_file_path = tmp.name
+
+        H_orig, W_orig = np.array(Image.open(temp_file_path).convert("RGB")).shape[:2]
+        if contour_mask is not None and contour_mask.filename:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                shutil.copyfileobj(contour_mask.file, ctmp)
+                contour_tmp_path = ctmp.name
+            contour_arr = np.array(
+                Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST)
+            )
+            tarsus_bin = (contour_arr > 0).astype(np.float32)
+        else:
+            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            mask_np = mask_tarsus.squeeze().numpy()
+            mask_full = np.array(
+                Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
+            )
+            tarsus_bin = (mask_full > 127).astype(np.float32)
+            unet_mask_img = Image.fromarray((tarsus_bin * 255).astype(np.uint8))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                unet_mask_img.save(ctmp.name)
+                contour_tmp_path = ctmp.name
+
+        pred_instance = maskrcnn_v3.infer_with_model(
+            image_path=temp_file_path,
+            model=maskrcnn3_model,
+            device=device,
+            contour_path=contour_tmp_path,
+        )
+
+        result_image, tortuosity_data = compute_results_from_instance_map(
+            pred_instance, temp_file_path, unet_model, device,
+            um_per_px=um_per_px,
+            precomputed_tarsus=tarsus_bin,
+        )
+
+        img_buffer = io.BytesIO()
+        result_image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+        binary_mask = tortuosity_data.get('binary_mask_glands')
+        binary_mask_base64 = None
+        if binary_mask is not None:
+            mask_image = Image.fromarray((binary_mask * 255).astype(np.uint8), mode='L')
+            mask_buffer = io.BytesIO()
+            mask_image.save(mask_buffer, format='PNG')
+            mask_buffer.seek(0)
+            binary_mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+
+        if background_tasks:
+            background_tasks.add_task(os.unlink, temp_file_path)
+        else:
+            os.unlink(temp_file_path)
+        if contour_tmp_path:
+            os.unlink(contour_tmp_path)
+
+        individual_tortuosities = tortuosity_data['individual_tortuosities']
+        individual_lengths = tortuosity_data.get('individual_lengths', [])
+        individual_thicknesses = tortuosity_data.get('individual_thicknesses', [])
+
+        return jsonable_encoder({
+            "success": True,
+            "message": "Mask R-CNN v3 analysis completed successfully",
+            "data": {
+                "processed_image": f"data:image/png;base64,{img_base64}",
+                "avg_tortuosity": round(tortuosity_data['avg_tortuosity'], 3),
+                "num_glands": tortuosity_data['num_glands'],
+                "individual_tortuosities": [round(t, 3) for t in individual_tortuosities],
+                "avg_length_px": round(tortuosity_data.get('avg_length_px', 0.0), 1),
+                "avg_thickness_px": round(tortuosity_data.get('avg_thickness_px', 0.0), 1),
+                "individual_lengths": [round(l, 1) for l in individual_lengths],
+                "individual_thicknesses": [round(t, 1) for t in individual_thicknesses],
+                "binary_mask_glands": f"data:image/png;base64,{binary_mask_base64}" if binary_mask_base64 else None,
+                "analysis_info": {
+                    "total_glands_analyzed": len(individual_tortuosities),
+                    "tortuosity_range": {
+                        "min": round(min(individual_tortuosities), 3) if individual_tortuosities else 0,
+                        "max": round(max(individual_tortuosities), 3) if individual_tortuosities else 0,
+                    },
+                },
+                "um_per_px": tortuosity_data.get('um_per_px', 1.0),
+                "avg_length_um": tortuosity_data.get('avg_length_um', 0.0),
+                "avg_thickness_um": tortuosity_data.get('avg_thickness_um', 0.0),
+                "avg_ICM": tortuosity_data.get('avg_ICM', 0.0),
+                "avg_ITA_deg": tortuosity_data.get('avg_ITA_deg', 0.0),
+                "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
+                "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
+                "individual_glands": tortuosity_data.get('individual_glands', []),
+            }
+        })
+
+    except Exception as e:
+        for p in [locals().get('temp_file_path'), contour_tmp_path]:
+            if p and os.path.exists(p):
+                os.unlink(p)
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[MASKRCNN3] ERROR: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Mask R-CNN v3 analysis failed: {str(e)}")
+
+
+@app.post("/analyze-maskrcnn4")
+async def analyze_maskrcnn4(
+    file: UploadFile = File(...),
+    um_per_px: float = Form(1.0),
+    contour_mask: Optional[UploadFile] = File(None),
+    background_tasks: BackgroundTasks = None
+):
+    """Mask R-CNN v4 — best_model (20).pth (same arch as v3)"""
+    if maskrcnn4_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Mask R-CNN v4 not loaded", "message": f"Checkpoint '{MASKRCNN4_CKPT_PATH}' missing or failed."}
+        )
+
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    allowed_extensions = {".jpg", ".jpeg", ".png"}
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Extension {file_extension} not allowed")
+
+    contour_tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            temp_file_path = tmp.name
+
+        H_orig, W_orig = np.array(Image.open(temp_file_path).convert("RGB")).shape[:2]
+        if contour_mask is not None and contour_mask.filename:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                shutil.copyfileobj(contour_mask.file, ctmp)
+                contour_tmp_path = ctmp.name
+            contour_arr = np.array(
+                Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST)
+            )
+            tarsus_bin = (contour_arr > 0).astype(np.float32)
+        else:
+            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            mask_np = mask_tarsus.squeeze().numpy()
+            mask_full = np.array(
+                Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
+            )
+            tarsus_bin = (mask_full > 127).astype(np.float32)
+            unet_mask_img = Image.fromarray((tarsus_bin * 255).astype(np.uint8))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                unet_mask_img.save(ctmp.name)
+                contour_tmp_path = ctmp.name
+
+        pred_instance = maskrcnn_v3.infer_with_model(
+            image_path=temp_file_path,
+            model=maskrcnn4_model,
+            device=device,
+            contour_path=contour_tmp_path,
+        )
+
+        result_image, tortuosity_data = compute_results_from_instance_map(
+            pred_instance, temp_file_path, unet_model, device,
+            um_per_px=um_per_px,
+            precomputed_tarsus=tarsus_bin,
+        )
+
+        img_buffer = io.BytesIO()
+        result_image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+        binary_mask = tortuosity_data.get('binary_mask_glands')
+        binary_mask_base64 = None
+        if binary_mask is not None:
+            mask_image = Image.fromarray((binary_mask * 255).astype(np.uint8), mode='L')
+            mask_buffer = io.BytesIO()
+            mask_image.save(mask_buffer, format='PNG')
+            mask_buffer.seek(0)
+            binary_mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+
+        if background_tasks:
+            background_tasks.add_task(os.unlink, temp_file_path)
+        else:
+            os.unlink(temp_file_path)
+        if contour_tmp_path:
+            os.unlink(contour_tmp_path)
+
+        individual_tortuosities = tortuosity_data['individual_tortuosities']
+        individual_lengths = tortuosity_data.get('individual_lengths', [])
+        individual_thicknesses = tortuosity_data.get('individual_thicknesses', [])
+
+        return jsonable_encoder({
+            "success": True,
+            "message": "Mask R-CNN v4 analysis completed successfully",
+            "data": {
+                "processed_image": f"data:image/png;base64,{img_base64}",
+                "avg_tortuosity": round(tortuosity_data['avg_tortuosity'], 3),
+                "num_glands": tortuosity_data['num_glands'],
+                "individual_tortuosities": [round(t, 3) for t in individual_tortuosities],
+                "avg_length_px": round(tortuosity_data.get('avg_length_px', 0.0), 1),
+                "avg_thickness_px": round(tortuosity_data.get('avg_thickness_px', 0.0), 1),
+                "individual_lengths": [round(l, 1) for l in individual_lengths],
+                "individual_thicknesses": [round(t, 1) for t in individual_thicknesses],
+                "binary_mask_glands": f"data:image/png;base64,{binary_mask_base64}" if binary_mask_base64 else None,
+                "analysis_info": {
+                    "total_glands_analyzed": len(individual_tortuosities),
+                    "tortuosity_range": {
+                        "min": round(min(individual_tortuosities), 3) if individual_tortuosities else 0,
+                        "max": round(max(individual_tortuosities), 3) if individual_tortuosities else 0,
+                    },
+                },
+                "um_per_px": tortuosity_data.get('um_per_px', 1.0),
+                "avg_length_um": tortuosity_data.get('avg_length_um', 0.0),
+                "avg_thickness_um": tortuosity_data.get('avg_thickness_um', 0.0),
+                "avg_ICM": tortuosity_data.get('avg_ICM', 0.0),
+                "avg_ITA_deg": tortuosity_data.get('avg_ITA_deg', 0.0),
+                "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
+                "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
+                "individual_glands": tortuosity_data.get('individual_glands', []),
+            }
+        })
+
+    except Exception as e:
+        for p in [locals().get('temp_file_path'), contour_tmp_path]:
+            if p and os.path.exists(p):
+                os.unlink(p)
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[MASKRCNN4] ERROR: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Mask R-CNN v4 analysis failed: {str(e)}")
 
 
 @app.post("/analyze-panoptic")
