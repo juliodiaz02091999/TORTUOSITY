@@ -7,6 +7,8 @@ scikit-image==0.25.2
 # Updated PyTorch versions to match local environment (critical for model loading)
 torch==2.5.1
 torchvision==0.20.1
+transformers==4.46.3
+accelerate==1.2.1
 opencv-python==4.10.0.84
 matplotlib==3.10.0
 scipy==1.15.2
