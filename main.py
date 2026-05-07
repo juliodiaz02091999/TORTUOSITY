@@ -14,6 +14,7 @@ from PIL import Image
 import json
 from typing import Optional, Dict, Any
 import numpy as np
+import cv2
 from skimage import exposure, img_as_ubyte, img_as_float32
 import mgda as mgda
 
@@ -1087,10 +1088,22 @@ async def analyze_panoptic6(
             contour_path=contour_tmp_path,
         )
 
+        _ys, _xs = np.where(tarsus_bin > 0)
+        if len(_xs) > 0 and len(_ys) > 0:
+            _x1 = max(0, int(_xs.min()) - panoptic_v6.CROP_MARGIN)
+            _x2 = min(W_orig, int(_xs.max()) + 1 + panoptic_v6.CROP_MARGIN)
+            _y1 = max(0, int(_ys.min()) - panoptic_v6.CROP_MARGIN)
+            _y2 = min(H_orig, int(_ys.max()) + 1 + panoptic_v6.CROP_MARGIN)
+        else:
+            _x1, _y1, _x2, _y2 = 0, 0, W_orig, H_orig
+        crop_filter_p6 = np.zeros((H_orig, W_orig), dtype=np.float32)
+        crop_filter_p6[_y1:_y2, _x1:_x2] = 1.0
+
         result_image, tortuosity_data = compute_results_from_instance_map(
             pred_instance, temp_file_path, unet_model, device,
             um_per_px=um_per_px,
-            precomputed_tarsus=tarsus_bin,
+            precomputed_tarsus=crop_filter_p6,
+            display_tarsus=tarsus_bin,
         )
 
         img_buffer = io.BytesIO()
@@ -1216,35 +1229,38 @@ async def analyze_panoptic(
             ) / 255.0
             tarsus_bin = (mask_full > 0.5).astype(np.uint8)
 
+        # Crop only in height (full width) so edge glands are never cut off by the
+        # UNet horizontal boundary, while still giving the model better resolution
+        # than using the full image.
         CROP_MARGIN = 20
         ys, xs = np.where(tarsus_bin > 0)
-        if len(xs) > 0 and len(ys) > 0:
-            x1 = max(0, int(xs.min()) - CROP_MARGIN)
-            x2 = min(W_orig, int(xs.max()) + 1 + CROP_MARGIN)
+        if len(ys) > 0:
             y1 = max(0, int(ys.min()) - CROP_MARGIN)
             y2 = min(H_orig, int(ys.max()) + 1 + CROP_MARGIN)
         else:
-            x1, y1, x2, y2 = 0, 0, W_orig, H_orig
+            y1, y2 = 0, H_orig
 
-        # Apply mask then crop — mirrors reference.py preprocess_image exactly:
-        #   img_np = img_np * contour_np[..., None]
-        #   img_np = img_np[y1:y2, x1:x2]
-        img_masked = img_np * tarsus_bin[..., None]
-        img_cropped = img_masked[y1:y2, x1:x2]
+        img_cropped = img_np[y1:y2, :]   # full width, height-cropped
+        h_c = img_cropped.shape[0]
 
         pred_instance_crop, _ = predict_panoptic_in_memory(
             img_cropped, panoptic_model, panoptic_processor, device
         )
 
-        # Place crop result back into full-image coordinates
+        # Per-instance bilinear resize back to original dimensions
         pred_instance = np.zeros((H_orig, W_orig), dtype=np.int32)
-        h_c, w_c = pred_instance_crop.shape
-        pred_instance[y1:y1+h_c, x1:x1+w_c] = pred_instance_crop
+        for inst_id in np.unique(pred_instance_crop):
+            if inst_id == 0:
+                continue
+            binary = (pred_instance_crop == inst_id).astype(np.float32)
+            binary_r = cv2.resize(binary, (W_orig, h_c), interpolation=cv2.INTER_LINEAR)
+            pred_instance[y1:y1+h_c, :][binary_r > 0.5] = inst_id
 
         result_image, tortuosity_data = compute_results_from_instance_map(
             pred_instance, temp_file_path, unet_model, device,
             um_per_px=um_per_px,
-            precomputed_tarsus=tarsus_bin.astype(np.float32),
+            precomputed_tarsus=tarsus_bin,
+            display_tarsus=tarsus_bin,
         )
 
         img_buffer = io.BytesIO()

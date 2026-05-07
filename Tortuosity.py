@@ -471,19 +471,27 @@ def calculate_gland_tortuosity(mask):
 # ------------------------------------------------------
 # Función de visualización y combinación final
 # ------------------------------------------------------
-def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0, precomputed_tarsus=None):
+def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0, precomputed_tarsus=None, display_tarsus=None):
     """
     Runs the full tortuosity pipeline given a pre-computed instance map.
-    pred_instance: HxW int32 numpy array (0=background, 1..N=gland ids).
-    precomputed_tarsus: optional HxW float32/uint8 numpy array (0/1). When
-        provided (e.g. user-drawn contour or already-run UNet), UNet is skipped.
+    pred_instance:      HxW int32 numpy array (0=background, 1..N=gland ids).
+    precomputed_tarsus: optional HxW float32 mask used to FILTER glands.
+                        When None, UNet is run to produce this mask.
+    display_tarsus:     optional HxW float32 mask used only for the overlay
+                        visualization (defaults to precomputed_tarsus / UNet mask).
     """
     if precomputed_tarsus is not None:
         original_image = Image.open(image_path).convert("RGB")
-        import torch as _torch
-        mask_tarsus = _torch.from_numpy(precomputed_tarsus.astype(np.float32)).unsqueeze(0)
+        mask_tarsus = torch.from_numpy(precomputed_tarsus.astype(np.float32)).unsqueeze(0)
     else:
         original_image, mask_tarsus = predict_unet_model(unet_model, image_path, device, use_clahe=True, use_tta=True)
+
+    # Separate display mask: allows showing the real tarsus shape even when a
+    # broader filter mask is used for gland filtering
+    if display_tarsus is not None:
+        mask_tarsus_display = torch.from_numpy(display_tarsus.astype(np.float32)).unsqueeze(0)
+    else:
+        mask_tarsus_display = mask_tarsus
 
     # Redimensionar la máscara de Tarsus a las dimensiones de la máscara de instancias
     mask_tarsus_resized = F.interpolate(mask_tarsus.unsqueeze(0), size=pred_instance.shape, mode='bilinear', align_corners=True)
@@ -514,27 +522,26 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
 
     for i in gland_ids:
         gland_mask = (pred_instance_cleaned == i).astype(np.uint8)
+
+        # Color every detected gland in the overlay (matches reference.py label2rgb behavior)
+        color = generate_random_color()
+        colored_instance_image[pred_instance_cleaned == i] = color
+
         metrics = calculate_gland_tortuosity(gland_mask)
         if metrics is None:
-            # Glándula demasiado pequeña o fragmentada — se excluye
+            # Too small/fragmented for tortuosity — visible in overlay but excluded from metrics
             continue
-        # Misma morfometría que pipeline (esqueleto + SG) para que avg_length_px y avg_length_um cuadren
+
         morph_data = morph_analyzer.measure(gland_mask)
         gland_tortuosities.append(metrics['tortuosity'])
         gland_lengths.append(morph_data["length_px"])
         gland_thicknesses.append(morph_data["thickness_px"])
 
-        # Análisis enriquecido: métricas en µm + ICM, ITA, DCF, IMCC, score, grade
         skel_p = skeletonize((gland_mask > 0).astype(np.uint8))
         ordered_pts = morph_analyzer._order_skeleton_points(skel_p)
-        # Suavizado Savitzky-Golay: elimina el zig-zag digital del esqueleto
-        # antes de calcular ITA y curvatura (igual que en calculate_gland_tortuosity)
         smooth_pts = _smooth_path(ordered_pts)
         tort_data = tort_analyzer.compute(smooth_pts, morph_data["length_um"])
         pipeline_results.append({**morph_data, **tort_data, "gland_id": f"G{len(pipeline_results)+1}"})
-
-        color = generate_random_color()
-        colored_instance_image[pred_instance_cleaned == i] = color
 
     # Filtrar outliers: tortuosidad > percentil 95 (cuando hay suficientes muestras)
     if len(gland_tortuosities) > 3:
@@ -574,7 +581,7 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
     result_image[mask_inst] = colored_instance_image[mask_inst]
 
     # Redimensionar la máscara de Tarsus para que tenga el mismo tamaño que la imagen original para su visualización
-    tarsus_mask_overlay = F.interpolate(mask_tarsus.unsqueeze(0), size=(image_np.shape[0], image_np.shape[1]), mode='bilinear', align_corners=True)
+    tarsus_mask_overlay = F.interpolate(mask_tarsus_display.unsqueeze(0), size=(image_np.shape[0], image_np.shape[1]), mode='bilinear', align_corners=True)
     tarsus_mask_overlay = tarsus_mask_overlay.squeeze(0).cpu().numpy()
     tarsus_mask_overlay = np.squeeze(tarsus_mask_overlay, axis=0)
     tarsus_mask_overlay = (tarsus_mask_overlay > 0.5).astype(np.uint8)

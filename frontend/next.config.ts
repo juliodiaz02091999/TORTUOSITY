@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: "https://tortuosity2-488176611125.us-central1.run.app/:path*",
+        destination: "http://localhost:8000/:path*",
       },
     ];
   },

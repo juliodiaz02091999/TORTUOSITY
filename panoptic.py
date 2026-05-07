@@ -45,9 +45,9 @@ DEFAULT_CKPT = "best_model.pth"
 _LOCAL_CONFIG = "/app/mask2former_config"
 
 def build_model():
-    # Use locally saved config if available (Cloud Run — no internet at runtime).
-    # Otherwise fall back to downloading from HuggingFace (local dev).
-    _local = os.path.isdir(_LOCAL_CONFIG)
+    # Use full locally saved model if available (Cloud Run — no internet at runtime).
+    # Otherwise download from HuggingFace (local dev).
+    _local = os.path.isdir(_LOCAL_CONFIG) and os.path.exists(os.path.join(_LOCAL_CONFIG, "config.json"))
     _src = _LOCAL_CONFIG if _local else MODEL_ID
 
     config = Mask2FormerConfig.from_pretrained(_src, local_files_only=_local)
@@ -57,9 +57,14 @@ def build_model():
     config.label2id = LABEL2ID
     config.is_thing_map = {0: False, 1: True}
 
-    # Initialize from config only — weights are loaded by load_checkpoint(),
-    # so we don't need to download HuggingFace pretrained weights here.
-    model = Mask2FormerForUniversalSegmentation(config)
+    model = Mask2FormerForUniversalSegmentation.from_pretrained(
+        _src,
+        config=config,
+        ignore_mismatched_sizes=True,
+        use_safetensors=True,
+        low_cpu_mem_usage=True,
+        local_files_only=_local,
+    )
 
     model.config.id2label = ID2LABEL
     model.config.label2id = LABEL2ID
@@ -405,21 +410,23 @@ def predict_panoptic_in_memory(
     ])
     img_tensor = t(Image.fromarray(img_resized.astype(np.uint8)))
 
+    H_in, W_in = img_tensor.shape[1], img_tensor.shape[2]  # 512, 512
+
     pixel_values = img_tensor.unsqueeze(0).to(device)
     with torch.amp.autocast("cuda", enabled=(device.type == "cuda")):
         outputs = model(pixel_values=pixel_values)
 
-    # Let the processor resize logits → binary masks via bilinear interpolation
-    # (cleaner than INTER_NEAREST on a discrete label map, avoids staircase artifacts)
+    # Same target_sizes as standalone script — keeps pred_instance at 512x512
+    # (no INTER_NEAREST resize back to crop dims, which causes fragmentation)
     inst = processor.post_process_instance_segmentation(
         outputs,
-        target_sizes=[(H_crop, W_crop)],
+        target_sizes=[(H_in, W_in)],
         threshold=score_threshold,
         mask_threshold=mask_threshold,
     )[0]
 
     pred_instance, _, kept_segments = parse_instance_output(
-        inst, H_crop, W_crop,
+        inst, H_in, W_in,
         score_threshold=score_threshold,
         min_area=MIN_INSTANCE_AREA,
     )

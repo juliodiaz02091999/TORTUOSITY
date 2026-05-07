@@ -41,13 +41,13 @@ RUN if [ -f ".gitattributes" ] && grep -q "\.pth.*lfs" .gitattributes; then \
         ls -la *.pth; \
     fi
 
-# Save Mask2Former config + processor locally (no large weights needed — our checkpoint provides them)
+# Save full Mask2Former base model + processor locally so runtime needs no internet access
 RUN python -c "\
 import os; os.makedirs('/app/mask2former_config', exist_ok=True); \
-from transformers import Mask2FormerConfig, AutoImageProcessor; \
-print('Downloading Mask2Former config...'); \
-cfg = Mask2FormerConfig.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance'); \
-cfg.save_pretrained('/app/mask2former_config'); \
+from transformers import Mask2FormerForUniversalSegmentation, AutoImageProcessor; \
+print('Downloading Mask2Former base model...'); \
+model = Mask2FormerForUniversalSegmentation.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_safetensors=True, low_cpu_mem_usage=True); \
+model.save_pretrained('/app/mask2former_config'); \
 print('Downloading processor...'); \
 proc = AutoImageProcessor.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_fast=False); \
 proc.save_pretrained('/app/mask2former_config'); \

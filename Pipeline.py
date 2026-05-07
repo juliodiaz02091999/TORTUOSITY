@@ -326,9 +326,11 @@ class TortuosityAnalyzer:
 
         # --- Score clínico ponderado ---
         # Solo ICM + ITA (base sólida). DCF / IMCC arriba: informativos, sin peso en score.
+        # ICM saturado en 2.0 (100 % más largo que la cuerda = tortuosidad muy alta).
+        # ITA saturado en 360° (vuelta completa acumulada = tortuosidad severa).
         score = (
-            0.50 * min((ICM  - 1.0) / 0.50, 1.0) +
-            0.50 * min(ITA_deg       / 90.0, 1.0)
+            0.50 * min((ICM  - 1.0) / 1.0,   1.0) +
+            0.50 * min(ITA_deg       / 360.0, 1.0)
         ) * 100
 
         # Clasificación
