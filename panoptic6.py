@@ -297,7 +297,6 @@ def load_model_server(model_path, device):
         config=config,
         ignore_mismatched_sizes=True,
         use_safetensors=True,
-        low_cpu_mem_usage=True,
         local_files_only=_local,
     )
     model.config.id2label = ID2LABEL

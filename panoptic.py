@@ -62,7 +62,6 @@ def build_model():
         config=config,
         ignore_mismatched_sizes=True,
         use_safetensors=True,
-        low_cpu_mem_usage=True,
         local_files_only=_local,
     )
 
