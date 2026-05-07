@@ -33,6 +33,7 @@ from panoptic import build_model as build_panoptic_model, load_checkpoint as loa
 from transformers import AutoImageProcessor
 import maskcrnn as maskrcnn_v2
 import maskcrnnv3 as maskrcnn_v3
+import panoptic6 as panoptic_v6
 
 # Create FastAPI app
 app = FastAPI(
@@ -84,6 +85,7 @@ PANOPTIC_MODEL_ID = "facebook/mask2former-swin-small-cityscapes-instance"
 MASKRCNN2_CKPT_PATH = "best_model (17).pth"
 MASKRCNN3_CKPT_PATH = "best_model (18).pth"
 MASKRCNN4_CKPT_PATH = "best_model (20).pth"
+PANOPTIC6_CKPT_PATH = "best_model (32).pth"
 
 # Global model instances (loaded once at startup)
 maskrcnn_model = None
@@ -94,6 +96,8 @@ panoptic_processor = None
 maskrcnn2_model = None
 maskrcnn3_model = None
 maskrcnn4_model = None
+panoptic6_model = None
+panoptic6_processor = None
 
 def try_load_model_with_fallbacks(load_function, model_paths, model_name):
     """Try to load a model from multiple possible paths"""
@@ -150,7 +154,7 @@ def clahe_like_imagej(img, block_radius=63, bins=255, slope=3.0, convert_to_gray
 @app.on_event("startup")
 async def startup_event():
     """Load models on startup"""
-    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model, maskrcnn3_model, maskrcnn4_model
+    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model, maskrcnn3_model, maskrcnn4_model, panoptic6_model, panoptic6_processor
     try:
         print("Starting model loading process...")
         print(f"Mask R-CNN model path: {MASK_RCNN_MODEL_PATH}")
@@ -314,6 +318,21 @@ async def startup_event():
             print(f"⚠ Failed to load Mask R-CNN v4 model: {e}")
             maskrcnn4_model = None
 
+        # Load Panoptic v6 (panoptic6.py — best_model 32, NUM_QUERIES=100)
+        try:
+            print("Loading Panoptic v6 model...")
+            if os.path.exists(PANOPTIC6_CKPT_PATH):
+                _p6_model, _p6_proc = panoptic_v6.load_model_server(PANOPTIC6_CKPT_PATH, device)
+                panoptic6_model = _p6_model
+                panoptic6_processor = _p6_proc
+                print("✓ Panoptic v6 model loaded successfully")
+            else:
+                print(f"✗ Panoptic v6 checkpoint not found: {PANOPTIC6_CKPT_PATH}")
+        except Exception as e:
+            print(f"⚠ Failed to load Panoptic v6 model: {e}")
+            panoptic6_model = None
+            panoptic6_processor = None
+
         if maskrcnn_model is not None and unet_model is not None:
             print("✓ All models loaded successfully!")
         else:
@@ -445,6 +464,7 @@ async def health_check():
             "maskrcnn2": maskrcnn2_model is not None,
             "maskrcnn3": maskrcnn3_model is not None,
             "maskrcnn4": maskrcnn4_model is not None,
+            "panoptic6": panoptic6_model is not None,
         },
         "device": str(device),
         "message": "Models loaded successfully" if models_loaded else "Some models failed to load"
@@ -485,6 +505,10 @@ async def model_status():
             "maskrcnn4": {
                 "status": "loaded" if maskrcnn4_model is not None else "failed",
                 "path": MASKRCNN4_CKPT_PATH,
+            },
+            "panoptic6": {
+                "status": "loaded" if panoptic6_model is not None else "failed",
+                "path": PANOPTIC6_CKPT_PATH,
             },
         },
         "device": str(device),
@@ -1012,6 +1036,127 @@ async def analyze_maskrcnn4(
         tb = traceback.format_exc()
         print(f"[MASKRCNN4] ERROR: {e}\n{tb}")
         raise HTTPException(status_code=500, detail=f"Mask R-CNN v4 analysis failed: {str(e)}")
+
+
+@app.post("/analyze-panoptic6")
+async def analyze_panoptic6(
+    file: UploadFile = File(...),
+    um_per_px: float = Form(1.0),
+    contour_mask: Optional[UploadFile] = File(None),
+    background_tasks: BackgroundTasks = None
+):
+    """Panoptic v6 — Mask2Former NUM_QUERIES=100, best_model (32).pth"""
+    if panoptic6_model is None or panoptic6_processor is None:
+        raise HTTPException(status_code=503, detail={"error": "Panoptic v6 not loaded", "message": f"Checkpoint '{PANOPTIC6_CKPT_PATH}' missing or failed."})
+
+    if file.content_type and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    allowed_extensions = {".jpg", ".jpeg", ".png"}
+    file_extension = Path(file.filename or "").suffix.lower() or ".jpg"
+    if file_extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Extension {file_extension} not allowed")
+
+    contour_tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            temp_file_path = tmp.name
+
+        H_orig, W_orig = np.array(Image.open(temp_file_path).convert("RGB")).shape[:2]
+        if contour_mask is not None and contour_mask.filename:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                shutil.copyfileobj(contour_mask.file, ctmp)
+                contour_tmp_path = ctmp.name
+            contour_arr = np.array(Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST))
+            tarsus_bin = (contour_arr > 0).astype(np.float32)
+        else:
+            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            mask_np = mask_tarsus.squeeze().numpy()
+            mask_full = np.array(Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR))
+            tarsus_bin = (mask_full > 127).astype(np.float32)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as ctmp:
+                Image.fromarray((tarsus_bin * 255).astype(np.uint8)).save(ctmp.name)
+                contour_tmp_path = ctmp.name
+
+        pred_instance = panoptic_v6.infer_with_model(
+            image_path=temp_file_path,
+            model=panoptic6_model,
+            processor=panoptic6_processor,
+            device=device,
+            contour_path=contour_tmp_path,
+        )
+
+        result_image, tortuosity_data = compute_results_from_instance_map(
+            pred_instance, temp_file_path, unet_model, device,
+            um_per_px=um_per_px,
+            precomputed_tarsus=tarsus_bin,
+        )
+
+        img_buffer = io.BytesIO()
+        result_image.save(img_buffer, format='PNG')
+        img_buffer.seek(0)
+        img_base64 = base64.b64encode(img_buffer.getvalue()).decode()
+
+        binary_mask = tortuosity_data.get('binary_mask_glands')
+        binary_mask_base64 = None
+        if binary_mask is not None:
+            mask_image = Image.fromarray((binary_mask * 255).astype(np.uint8), mode='L')
+            mask_buffer = io.BytesIO()
+            mask_image.save(mask_buffer, format='PNG')
+            mask_buffer.seek(0)
+            binary_mask_base64 = base64.b64encode(mask_buffer.getvalue()).decode()
+
+        if background_tasks:
+            background_tasks.add_task(os.unlink, temp_file_path)
+        else:
+            os.unlink(temp_file_path)
+        if contour_tmp_path:
+            os.unlink(contour_tmp_path)
+
+        individual_tortuosities = tortuosity_data['individual_tortuosities']
+        individual_lengths = tortuosity_data.get('individual_lengths', [])
+        individual_thicknesses = tortuosity_data.get('individual_thicknesses', [])
+
+        return jsonable_encoder({
+            "success": True,
+            "message": "Panoptic v6 analysis completed successfully",
+            "data": {
+                "processed_image": f"data:image/png;base64,{img_base64}",
+                "avg_tortuosity": round(tortuosity_data['avg_tortuosity'], 3),
+                "num_glands": tortuosity_data['num_glands'],
+                "individual_tortuosities": [round(t, 3) for t in individual_tortuosities],
+                "avg_length_px": round(tortuosity_data.get('avg_length_px', 0.0), 1),
+                "avg_thickness_px": round(tortuosity_data.get('avg_thickness_px', 0.0), 1),
+                "individual_lengths": [round(l, 1) for l in individual_lengths],
+                "individual_thicknesses": [round(t, 1) for t in individual_thicknesses],
+                "binary_mask_glands": f"data:image/png;base64,{binary_mask_base64}" if binary_mask_base64 else None,
+                "analysis_info": {
+                    "total_glands_analyzed": len(individual_tortuosities),
+                    "tortuosity_range": {
+                        "min": round(min(individual_tortuosities), 3) if individual_tortuosities else 0,
+                        "max": round(max(individual_tortuosities), 3) if individual_tortuosities else 0,
+                    },
+                },
+                "um_per_px": tortuosity_data.get('um_per_px', 1.0),
+                "avg_length_um": tortuosity_data.get('avg_length_um', 0.0),
+                "avg_thickness_um": tortuosity_data.get('avg_thickness_um', 0.0),
+                "avg_ICM": tortuosity_data.get('avg_ICM', 0.0),
+                "avg_ITA_deg": tortuosity_data.get('avg_ITA_deg', 0.0),
+                "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
+                "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
+                "individual_glands": tortuosity_data.get('individual_glands', []),
+            }
+        })
+
+    except Exception as e:
+        for p in [locals().get('temp_file_path'), contour_tmp_path]:
+            if p and os.path.exists(p):
+                os.unlink(p)
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[PANOPTIC6] ERROR: {e}\n{tb}")
+        raise HTTPException(status_code=500, detail=f"Panoptic v6 analysis failed: {str(e)}")
 
 
 @app.post("/analyze-panoptic")
