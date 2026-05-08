@@ -110,6 +110,7 @@ export default function DashboardPage() {
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
   const [umPerPx, setUmPerPx] = useState<number>(1.0);
   const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "maskrcnn3" | "maskrcnn4" | "panoptic" | "panoptic6">("maskrcnn");
+  const [tarsusVersion, setTarsusVersion] = useState<"v1" | "v2">("v1");
   const [contourMask, setContourMask] = useState<string | null>(null);
   const [showMaskDrawer, setShowMaskDrawer] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -225,6 +226,7 @@ export default function DashboardPage() {
       const formData = new FormData();
       formData.append("file", fileToAnalyze);
       formData.append("um_per_px", umPerPx.toString());
+      formData.append("tarsus_version", tarsusVersion);
 
       if ((segmentationModel === "panoptic" || segmentationModel === "panoptic6" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && contourMask) {
         const maskBlob = await fetch(contourMask).then(r => r.blob());
@@ -670,6 +672,32 @@ export default function DashboardPage() {
                         {umPerPx === 1.0
                           ? "Las medidas se mostrarán en píxeles"
                           : `Factor: ${umPerPx} µm/px — medidas en micrómetros reales`}
+                      </p>
+                    </div>
+
+                    {/* Selector de modelo de contorno del párpado */}
+                    <div className="flex flex-col items-center space-y-2 w-full">
+                      <Label className="text-sm font-medium">Contorno del párpado (UNet)</Label>
+                      <div className="flex rounded-md border border-border overflow-hidden w-full max-w-sm">
+                        {(["v1", "v2"] as const).map((v) => (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => setTarsusVersion(v)}
+                            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors border-l first:border-l-0 border-border ${
+                              tarsusVersion === v
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-background text-muted-foreground hover:bg-muted"
+                            }`}
+                          >
+                            UNet {v}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground text-center">
+                        {tarsusVersion === "v2"
+                          ? "UNet v2 — best_model_tarsus_improved.pth"
+                          : "UNet v1 — final_model_tarsus_improved (6).pth"}
                       </p>
                     </div>
 

@@ -84,6 +84,7 @@ FALLBACK_UNET_PATHS = [
 PANOPTIC_CKPT_PATH = "best_model (13).pth"
 PANOPTIC_MODEL_ID = "facebook/mask2former-swin-small-cityscapes-instance"
 MASKRCNN2_CKPT_PATH = "best_model (17).pth"
+UNET2_MODEL_PATH = "best_model_tarsus_improved.pth"
 MASKRCNN3_CKPT_PATH = "best_model (18).pth"
 MASKRCNN4_CKPT_PATH = "best_model (20).pth"
 PANOPTIC6_CKPT_PATH = "best_model (32).pth"
@@ -99,6 +100,7 @@ maskrcnn3_model = None
 maskrcnn4_model = None
 panoptic6_model = None
 panoptic6_processor = None
+unet2_model = None
 
 def try_load_model_with_fallbacks(load_function, model_paths, model_name):
     """Try to load a model from multiple possible paths"""
@@ -152,10 +154,17 @@ def clahe_like_imagej(img, block_radius=63, bins=255, slope=3.0, convert_to_gray
     else:
         raise ValueError("Solo imágenes 2D o RGB.")
 
+def get_unet(version: str):
+    """Return the requested UNet model, falling back to v1 if v2 not loaded."""
+    if version == "v2" and unet2_model is not None:
+        return unet2_model
+    return unet_model
+
+
 @app.on_event("startup")
 async def startup_event():
     """Load models on startup"""
-    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model, maskrcnn3_model, maskrcnn4_model, panoptic6_model, panoptic6_processor
+    global maskrcnn_model, unet_model, meibomio_model, panoptic_model, panoptic_processor, maskrcnn2_model, maskrcnn3_model, maskrcnn4_model, panoptic6_model, panoptic6_processor, unet2_model
     try:
         print("Starting model loading process...")
         print(f"Mask R-CNN model path: {MASK_RCNN_MODEL_PATH}")
@@ -219,6 +228,16 @@ async def startup_event():
         except Exception as e:
             print(f"✗ Failed to load UNet model: {e}")
             unet_model = None
+
+        print("Loading UNet v2 (tarsus) model...")
+        try:
+            unet2_model = try_load_model_with_fallbacks(
+                lambda path: load_unet_model(path, device), [UNET2_MODEL_PATH], "UNet v2"
+            )
+            print("✓ UNet v2 model loaded successfully")
+        except Exception as e:
+            print(f"⚠ Failed to load UNet v2 model: {e}")
+            unet2_model = None
 
         # Load MGDA meibomian glands model (separate UNet)
         try:
@@ -460,6 +479,7 @@ async def health_check():
         "models_loaded": {
             "maskrcnn": maskrcnn_model is not None,
             "unet": unet_model is not None,
+            "unet2": unet2_model is not None,
             "meibomio": meibomio_model is not None,
             "panoptic": panoptic_model is not None,
             "maskrcnn2": maskrcnn2_model is not None,
@@ -522,6 +542,7 @@ async def model_status():
 async def analyze_image(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     background_tasks: BackgroundTasks = None
 ):
     """
@@ -578,7 +599,7 @@ async def analyze_image(
         result_image, tortuosity_data = show_combined_result_with_models(
             temp_file_path,
             maskrcnn_model,
-            unet_model,
+            get_unet(tarsus_version),
             device,
             um_per_px=um_per_px
         )
@@ -657,6 +678,7 @@ async def analyze_image(
 async def analyze_maskrcnn2(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     contour_mask: Optional[UploadFile] = File(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -692,7 +714,7 @@ async def analyze_maskrcnn2(
             )
             tarsus_bin = (contour_arr > 0).astype(np.float32)
         else:
-            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            _, mask_tarsus = predict_unet_model(get_unet(tarsus_version), temp_file_path, device, use_clahe=True, use_tta=True)
             mask_np = mask_tarsus.squeeze().numpy()
             mask_full = np.array(
                 Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
@@ -711,7 +733,7 @@ async def analyze_maskrcnn2(
         )
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, unet_model, device,
+            pred_instance, temp_file_path, get_unet(tarsus_version), device,
             um_per_px=um_per_px,
             precomputed_tarsus=tarsus_bin,
         )
@@ -787,6 +809,7 @@ async def analyze_maskrcnn2(
 async def analyze_maskrcnn3(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     contour_mask: Optional[UploadFile] = File(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -821,7 +844,7 @@ async def analyze_maskrcnn3(
             )
             tarsus_bin = (contour_arr > 0).astype(np.float32)
         else:
-            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            _, mask_tarsus = predict_unet_model(get_unet(tarsus_version), temp_file_path, device, use_clahe=True, use_tta=True)
             mask_np = mask_tarsus.squeeze().numpy()
             mask_full = np.array(
                 Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
@@ -840,7 +863,7 @@ async def analyze_maskrcnn3(
         )
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, unet_model, device,
+            pred_instance, temp_file_path, get_unet(tarsus_version), device,
             um_per_px=um_per_px,
             precomputed_tarsus=tarsus_bin,
         )
@@ -915,6 +938,7 @@ async def analyze_maskrcnn3(
 async def analyze_maskrcnn4(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     contour_mask: Optional[UploadFile] = File(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -949,7 +973,7 @@ async def analyze_maskrcnn4(
             )
             tarsus_bin = (contour_arr > 0).astype(np.float32)
         else:
-            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            _, mask_tarsus = predict_unet_model(get_unet(tarsus_version), temp_file_path, device, use_clahe=True, use_tta=True)
             mask_np = mask_tarsus.squeeze().numpy()
             mask_full = np.array(
                 Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
@@ -968,7 +992,7 @@ async def analyze_maskrcnn4(
         )
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, unet_model, device,
+            pred_instance, temp_file_path, get_unet(tarsus_version), device,
             um_per_px=um_per_px,
             precomputed_tarsus=tarsus_bin,
         )
@@ -1043,6 +1067,7 @@ async def analyze_maskrcnn4(
 async def analyze_panoptic6(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     contour_mask: Optional[UploadFile] = File(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -1072,7 +1097,7 @@ async def analyze_panoptic6(
             contour_arr = np.array(Image.open(contour_tmp_path).convert("L").resize((W_orig, H_orig), Image.NEAREST))
             tarsus_bin = (contour_arr > 0).astype(np.float32)
         else:
-            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            _, mask_tarsus = predict_unet_model(get_unet(tarsus_version), temp_file_path, device, use_clahe=True, use_tta=True)
             mask_np = mask_tarsus.squeeze().numpy()
             mask_full = np.array(Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR))
             tarsus_bin = (mask_full > 127).astype(np.float32)
@@ -1100,7 +1125,7 @@ async def analyze_panoptic6(
         crop_filter_p6[_y1:_y2, _x1:_x2] = 1.0
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, unet_model, device,
+            pred_instance, temp_file_path, get_unet(tarsus_version), device,
             um_per_px=um_per_px,
             precomputed_tarsus=crop_filter_p6,
             display_tarsus=tarsus_bin,
@@ -1176,6 +1201,7 @@ async def analyze_panoptic6(
 async def analyze_panoptic(
     file: UploadFile = File(...),
     um_per_px: float = Form(1.0),
+    tarsus_version: str = Form("v1"),
     contour_mask: Optional[UploadFile] = File(None),
     background_tasks: BackgroundTasks = None
 ):
@@ -1222,7 +1248,7 @@ async def analyze_panoptic(
             tarsus_bin = (contour_arr > 0).astype(np.uint8)
         else:
             # Fall back to UNet tarsus prediction
-            _, mask_tarsus = predict_unet_model(unet_model, temp_file_path, device, use_clahe=True, use_tta=True)
+            _, mask_tarsus = predict_unet_model(get_unet(tarsus_version), temp_file_path, device, use_clahe=True, use_tta=True)
             mask_np = mask_tarsus.squeeze().numpy()
             mask_full = np.array(
                 Image.fromarray((mask_np * 255).astype(np.uint8)).resize((W_orig, H_orig), Image.BILINEAR)
@@ -1257,7 +1283,7 @@ async def analyze_panoptic(
             pred_instance[y1:y1+h_c, :][binary_r > 0.5] = inst_id
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, unet_model, device,
+            pred_instance, temp_file_path, get_unet(tarsus_version), device,
             um_per_px=um_per_px,
             precomputed_tarsus=tarsus_bin,
             display_tarsus=tarsus_bin,

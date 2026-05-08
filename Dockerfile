@@ -30,6 +30,7 @@ RUN if [ -f ".gitattributes" ] && grep -q "\.pth.*lfs" .gitattributes; then \
         echo "Downloading model files from GitHub LFS..."; \
         curl -L "https://github.com/juliodiaz0209/TORTUOSITY/raw/main/final_model%20(11).pth" -o "final_model (11).pth" || echo "Failed: final_model (11).pth"; \
         curl -L "https://github.com/juliodiaz0209/TORTUOSITY/raw/main/final_model_tarsus_improved.pth" -o "final_model_tarsus_improved.pth" || echo "Failed: final_model_tarsus_improved.pth"; \
+        curl -L "https://github.com/juliodiaz02091999/TORTUOSITY/raw/main/best_model_tarsus_improved.pth" -o "best_model_tarsus_improved.pth" || echo "Failed: best_model_tarsus_improved.pth"; \
         curl -L "https://github.com/juliodiaz0209/TORTUOSITY/raw/main/final_model_tarsus.pth" -o "final_model_tarsus.pth" || echo "Failed: final_model_tarsus.pth"; \
         curl -L "https://github.com/juliodiaz0209/TORTUOSITY/raw/main/final_model_improved_fixed.pth" -o "final_model_improved_fixed.pth" || echo "Failed: final_model_improved_fixed.pth"; \
         curl -L "https://github.com/juliodiaz0209/TORTUOSITY/raw/main/final_model_tarsus_improved%20(6).pth" -o "final_model_tarsus_improved (6).pth" || echo "Failed: final_model_tarsus_improved (6).pth"; \
