@@ -283,7 +283,7 @@ def load_model_server(model_path, device):
     _local = os.path.isdir(_LOCAL_CONFIG)
     _src = _LOCAL_CONFIG if _local else MODEL_ID
 
-    processor = AutoImageProcessor.from_pretrained(_src, local_files_only=_local)
+    processor = AutoImageProcessor.from_pretrained(_src, use_fast=False, local_files_only=_local)
 
     config = Mask2FormerConfig.from_pretrained(_src, local_files_only=_local)
     config.num_labels = 2

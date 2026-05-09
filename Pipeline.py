@@ -286,6 +286,25 @@ class TortuosityAnalyzer:
         diffs = np.diff(pts.astype(float), axis=0)
         return np.arctan2(diffs[:, 0], diffs[:, 1])
 
+    @staticmethod
+    def _resample_equidistant(pts: np.ndarray, n_points: int = 40) -> np.ndarray:
+        """
+        Resample a path to n_points equidistant points using linear interpolation.
+        Eliminates pixel-level staircase noise before angle computation.
+        """
+        if len(pts) < 2:
+            return pts
+        diffs = np.diff(pts.astype(float), axis=0)
+        seg_len = np.sqrt((diffs ** 2).sum(axis=1))
+        cumlen = np.concatenate([[0.0], np.cumsum(seg_len)])
+        total = cumlen[-1]
+        if total < 1e-9:
+            return pts
+        positions = np.linspace(0, total, n_points)
+        new_y = np.interp(positions, cumlen, pts[:, 0].astype(float))
+        new_x = np.interp(positions, cumlen, pts[:, 1].astype(float))
+        return np.column_stack([new_y, new_x])
+
     def compute(self, ordered_pts: np.ndarray, length_um: float) -> Dict[str, float]:
         """
         Recibe los puntos ordenados del esqueleto y la longitud real.
@@ -302,11 +321,15 @@ class TortuosityAnalyzer:
         # --- ICM ---
         direct_dist = np.linalg.norm(pts[-1] - pts[0])
         diffs = np.diff(pts, axis=0)
-        real_length = float(np.sqrt((diffs**2).sum(axis=1)).sum())
+        real_length = float(np.sqrt((diffs ** 2).sum(axis=1)).sum())
         ICM = real_length / max(direct_dist, 1e-9)
 
         # --- ITA ---
-        angles = self._tangent_angles(pts)
+        # Resample to 40 equidistant points before angle computation.
+        # This removes pixel-level staircase noise that accumulates to hundreds
+        # of spurious degrees even on near-straight glands.
+        pts_ita = self._resample_equidistant(pts, n_points=40)
+        angles = self._tangent_angles(pts_ita)
         delta_angles = np.abs(np.diff(np.unwrap(angles)))
         ITA_deg = float(np.degrees(delta_angles.sum()))
 

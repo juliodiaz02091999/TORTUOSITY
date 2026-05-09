@@ -308,14 +308,14 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <div className="max-h-64 sm:max-h-96 overflow-y-auto custom-scrollbar">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-xs sm:text-sm">ID</TableHead>
-                    <TableHead className="text-xs sm:text-sm">ICM</TableHead>
-                    <TableHead className="text-xs sm:text-sm">ITA (°)</TableHead>
-                    <TableHead className="text-xs sm:text-sm">Long. ({unitLabel})</TableHead>
-                    <TableHead className="text-xs sm:text-sm">Grosor ({unitLabel})</TableHead>
-                    <TableHead className="text-xs sm:text-sm">Score</TableHead>
-                    <TableHead className="text-xs sm:text-sm">Grado</TableHead>
+                  <TableRow className="bg-card hover:bg-card border-b-2 border-border">
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ID</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ICM</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ITA (°)</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Long. ({unitLabel})</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Grosor ({unitLabel})</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Score</TableHead>
+                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Grado</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>

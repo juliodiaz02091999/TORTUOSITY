@@ -1255,9 +1255,7 @@ async def analyze_panoptic(
             ) / 255.0
             tarsus_bin = (mask_full > 0.5).astype(np.uint8)
 
-        # Crop only in height (full width) so edge glands are never cut off by the
-        # UNet horizontal boundary, while still giving the model better resolution
-        # than using the full image.
+        # Crop only in height (full width) — keeps all horizontal glands visible
         CROP_MARGIN = 20
         ys, xs = np.where(tarsus_bin > 0)
         if len(ys) > 0:
@@ -1266,28 +1264,60 @@ async def analyze_panoptic(
         else:
             y1, y2 = 0, H_orig
 
-        img_cropped = img_np[y1:y2, :]   # full width, height-cropped
-        h_c = img_cropped.shape[0]
+        img_cropped = img_np[y1:y2, :]
+        h_c, w_c = img_cropped.shape[:2]
 
-        pred_instance_crop, _ = predict_panoptic_in_memory(
+        pred_instance_512, _ = predict_panoptic_in_memory(
             img_cropped, panoptic_model, panoptic_processor, device
         )
 
-        # Per-instance bilinear resize back to original dimensions
-        pred_instance = np.zeros((H_orig, W_orig), dtype=np.int32)
-        for inst_id in np.unique(pred_instance_crop):
-            if inst_id == 0:
-                continue
-            binary = (pred_instance_crop == inst_id).astype(np.float32)
-            binary_r = cv2.resize(binary, (W_orig, h_c), interpolation=cv2.INTER_LINEAR)
-            pred_instance[y1:y1+h_c, :][binary_r > 0.5] = inst_id
+        # Work entirely at 512x512 to avoid anisotropic distortion.
+        # Meibomian glands run vertically, so um_per_px scales with h_c/512.
+        um_per_px_512 = um_per_px * (h_c / 512.0)
+
+        # Save 512x512 crop image for the tortuosity pipeline
+        img_vis_512 = cv2.resize(img_cropped, (512, 512), interpolation=cv2.INTER_LINEAR)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as vis_tmp:
+            Image.fromarray(img_vis_512.astype(np.uint8)).save(vis_tmp.name)
+            vis_tmp_path = vis_tmp.name
+
+        # Tarsus mask at 512x512 crop space
+        tarsus_crop_512 = cv2.resize(
+            tarsus_bin[y1:y2, :].astype(np.float32), (512, 512),
+            interpolation=cv2.INTER_NEAREST
+        )
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance, temp_file_path, get_unet(tarsus_version), device,
-            um_per_px=um_per_px,
-            precomputed_tarsus=tarsus_bin,
-            display_tarsus=tarsus_bin,
+            pred_instance_512, vis_tmp_path, get_unet(tarsus_version), device,
+            um_per_px=um_per_px_512,
+            precomputed_tarsus=tarsus_crop_512,
+            display_tarsus=tarsus_crop_512,
+            show_title=False,
+            show_tarsus=False,
         )
+        os.unlink(vis_tmp_path)
+
+        # Embed 512x512 result into full original image, then re-add title at top
+        result_crop = result_image.convert("RGB").resize((W_orig, h_c), Image.BILINEAR)
+        full_result = np.array(Image.open(temp_file_path).convert("RGB"))
+        full_result[y1:y1+h_c, :] = np.array(result_crop)
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        avg_tort = tortuosity_data.get("avg_tortuosity", 0)
+        _fig, _ax = _plt.subplots(figsize=(10, 5))
+        _ax.imshow(full_result)
+        _ax.imshow(tarsus_bin, cmap="jet", alpha=0.5)
+        _ax.set_title(
+            f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tort:.3f}"
+        )
+        _ax.axis("off")
+        _buf = io.BytesIO()
+        _fig.savefig(_buf, format="png", bbox_inches="tight", pad_inches=0)
+        _buf.seek(0)
+        result_image = Image.open(_buf).copy()
+        _plt.close(_fig)
 
         img_buffer = io.BytesIO()
         result_image.save(img_buffer, format='PNG')

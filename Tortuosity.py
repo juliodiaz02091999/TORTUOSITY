@@ -471,7 +471,7 @@ def calculate_gland_tortuosity(mask):
 # ------------------------------------------------------
 # Función de visualización y combinación final
 # ------------------------------------------------------
-def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0, precomputed_tarsus=None, display_tarsus=None):
+def compute_results_from_instance_map(pred_instance, image_path, unet_model, device, um_per_px: float = 1.0, precomputed_tarsus=None, display_tarsus=None, show_title: bool = True, show_tarsus: bool = True):
     """
     Runs the full tortuosity pipeline given a pre-computed instance map.
     pred_instance:      HxW int32 numpy array (0=background, 1..N=gland ids).
@@ -533,14 +533,20 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
             continue
 
         morph_data = morph_analyzer.measure(gland_mask)
-        gland_tortuosities.append(metrics['tortuosity'])
-        gland_lengths.append(morph_data["length_px"])
-        gland_thicknesses.append(morph_data["thickness_px"])
 
         skel_p = skeletonize((gland_mask > 0).astype(np.uint8))
         ordered_pts = morph_analyzer._order_skeleton_points(skel_p)
         smooth_pts = _smooth_path(ordered_pts)
         tort_data = tort_analyzer.compute(smooth_pts, morph_data["length_um"])
+
+        # Filter skeleton artifacts: ICM > 3 indicates the path traversal
+        # created a circuitous route through a complex gland topology
+        if tort_data["ICM"] > 3.0:
+            continue
+
+        gland_tortuosities.append(metrics['tortuosity'])
+        gland_lengths.append(morph_data["length_px"])
+        gland_thicknesses.append(morph_data["thickness_px"])
         pipeline_results.append({**morph_data, **tort_data, "gland_id": f"G{len(pipeline_results)+1}"})
 
     # Filtrar outliers: tortuosidad > percentil 95 (cuando hay suficientes muestras)
@@ -588,8 +594,10 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
 
     plt.figure(figsize=(10, 10))
     plt.imshow(result_image)
-    plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
-    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
+    if show_tarsus:
+        plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
+    if show_title:
+        plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
     plt.axis("off")
     # plt.show() # Commented out for Streamlit integration
 
@@ -699,8 +707,10 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
 
     plt.figure(figsize=(10, 10))
     plt.imshow(result_image)
-    plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
-    plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
+    if show_tarsus:
+        plt.imshow(tarsus_mask_overlay, cmap="jet", alpha=0.5)
+    if show_title:
+        plt.title(f"Instancias (colores únicos) y contorno del párpado\nTortuosidad mediana: {avg_tortuosity:.3f}")
     plt.axis("off")
     # plt.show() # Commented out for Streamlit integration
 
