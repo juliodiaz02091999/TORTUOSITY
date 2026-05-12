@@ -347,14 +347,9 @@ class TortuosityAnalyzer:
         kappa_max = float(curv.max()) if len(curv) > 0 else 0.0
         IMCC = kappa_max * (length_um / 1000.0)  # normalizado a mm
 
-        # --- Score clínico ponderado ---
-        # Solo ICM + ITA (base sólida). DCF / IMCC arriba: informativos, sin peso en score.
-        # ICM saturado en 2.0 (100 % más largo que la cuerda = tortuosidad muy alta).
-        # ITA saturado en 360° (vuelta completa acumulada = tortuosidad severa).
-        score = (
-            0.50 * min((ICM  - 1.0) / 1.0,   1.0) +
-            0.50 * min(ITA_deg       / 360.0, 1.0)
-        ) * 100
+        # --- Score clínico (solo ICM) ---
+        # ICM saturado en 1.0 (100% más largo que la cuerda = tortuosidad muy alta).
+        score = min((ICM - 1.0) / 1.0, 1.0) * 100
 
         # Clasificación
         if score < 20:

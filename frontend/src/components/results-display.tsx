@@ -174,23 +174,6 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
           </CardContent>
         </Card>
 
-        <Card className="border-border">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xs sm:text-sm font-medium">ITA (promedio)</CardTitle>
-            <Info className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-lg sm:text-2xl font-bold">
-              {meanITA != null ? `${meanITA.toFixed(1)}°` : "—"}
-            </div>
-            <p className="text-xs text-muted-foreground">Ángulo tangente acum.</p>
-            {itaRange.min != null && itaRange.max != null && itaRange.max !== itaRange.min ? (
-              <p className="text-xs text-muted-foreground mt-1">
-                En tabla: {itaRange.min.toFixed(1)}° – {itaRange.max.toFixed(1)}°
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
 
         <Card className="border-border">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -250,11 +233,6 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                 <div className="text-xs text-muted-foreground">longitud / distancia directa</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
-                <div className="text-xs text-muted-foreground mb-1">ITA (promedio)</div>
-                <div className="font-bold text-lg">{meanITA != null ? `${meanITA.toFixed(1)}°` : "—"}</div>
-                <div className="text-xs text-muted-foreground">suma |Δθ| a lo largo del eje</div>
-              </div>
-              <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">Score Clínico</div>
                 <div className="font-bold text-lg">
                   {avgScore != null ? avgScore.toFixed(1) : "—"}
@@ -311,7 +289,6 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                   <TableRow className="bg-card hover:bg-card border-b-2 border-border">
                     <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ID</TableHead>
                     <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ICM</TableHead>
-                    <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">ITA (°)</TableHead>
                     <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Long. ({unitLabel})</TableHead>
                     <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Grosor ({unitLabel})</TableHead>
                     <TableHead className="text-xs sm:text-sm font-medium text-muted-foreground">Score</TableHead>
@@ -330,9 +307,6 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                         <TableCell className="font-medium text-xs sm:text-sm">{g?.gland_id ?? `G${index + 1}`}</TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {icmN != null ? icmN.toFixed(4) : value.toFixed(3)}
-                        </TableCell>
-                        <TableCell className="text-xs sm:text-sm">
-                          {itaN != null ? itaN.toFixed(1) : "—"}
                         </TableCell>
                         <TableCell className="text-xs sm:text-sm">
                           {calibrated
@@ -410,7 +384,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <div className="text-center p-3 sm:p-4 bg-green-50 dark:bg-green-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-green-600">0 – 20</div>
               <div className="text-xs sm:text-sm font-semibold text-green-700 dark:text-green-300">Normal</div>
-              <div className="text-xs text-green-600 dark:text-green-400 mt-1">ICM ≈ 1.0 · ITA &lt; 20°</div>
+              <div className="text-xs text-green-600 dark:text-green-400 mt-1">ICM ≈ 1.0</div>
             </div>
             <div className="text-center p-3 sm:p-4 bg-yellow-50 dark:bg-yellow-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-yellow-600">20 – 45</div>
@@ -433,13 +407,10 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
               <span className="font-semibold">ICM</span> — Índice de Curva Media: longitud real / distancia directa (1.0 = recto)
             </div>
             <div className="p-3 rounded-lg bg-muted">
-              <span className="font-semibold">ITA</span> — Índice de Ángulo Tangente: suma acumulada de cambios de dirección (°)
-            </div>
-            <div className="p-3 rounded-lg bg-muted">
               <span className="font-semibold">DCF</span> — Densidad de inflexiones por µm de longitud
             </div>
             <div className="p-3 rounded-lg bg-muted">
-              <span className="font-semibold">Score</span> — Ponderación clínica de los 4 índices (0–100, refs: Arita et al.)
+              <span className="font-semibold">Score</span> — Basado en ICM: (ICM − 1) × 100, saturado en 100
             </div>
           </div>
           <p className="text-xs text-muted-foreground italic text-center">

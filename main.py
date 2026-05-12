@@ -1267,38 +1267,51 @@ async def analyze_panoptic(
         img_cropped = img_np[y1:y2, :]
         h_c, w_c = img_cropped.shape[:2]
 
-        pred_instance_512, _ = predict_panoptic_in_memory(
-            img_cropped, panoptic_model, panoptic_processor, device
+        # Letterboxing: pad crop to square so resize to 512x512 is isotropic.
+        # This ensures length (vertical) and thickness (horizontal) use the same scale.
+        max_dim = max(h_c, w_c)
+        pad_top = (max_dim - h_c) // 2
+        padded = np.zeros((max_dim, max_dim, 3), dtype=np.uint8)
+        padded[pad_top:pad_top + h_c, :w_c] = img_cropped
+
+        pred_instance_padded, _ = predict_panoptic_in_memory(
+            padded, panoptic_model, panoptic_processor, device
         )
 
-        # Work entirely at 512x512 to avoid anisotropic distortion.
-        # Meibomian glands run vertically, so um_per_px scales with h_c/512.
-        um_per_px_512 = um_per_px * (h_c / 512.0)
+        # Unpad: extract crop region from 512x512 pred
+        scale = 512 / max_dim
+        r1 = int(round(pad_top * scale))
+        r2 = min(512, int(round((pad_top + h_c) * scale)))
+        pred_instance_crop_region = pred_instance_padded[r1:r2, :]
 
-        # Save 512x512 crop image for the tortuosity pipeline
-        img_vis_512 = cv2.resize(img_cropped, (512, 512), interpolation=cv2.INTER_LINEAR)
+        # Isotropic um_per_px: same scale in x and y
+        um_per_px_iso = um_per_px * max_dim / 512
+
+        # Crop vis image from padded 512x512
+        padded_512 = cv2.resize(padded, (512, 512), interpolation=cv2.INTER_LINEAR)
+        img_vis_crop = padded_512[r1:r2, :]
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as vis_tmp:
-            Image.fromarray(img_vis_512.astype(np.uint8)).save(vis_tmp.name)
+            Image.fromarray(img_vis_crop.astype(np.uint8)).save(vis_tmp.name)
             vis_tmp_path = vis_tmp.name
 
-        # Tarsus mask at 512x512 crop space
-        tarsus_crop_512 = cv2.resize(
-            tarsus_bin[y1:y2, :].astype(np.float32), (512, 512),
-            interpolation=cv2.INTER_NEAREST
-        )
+        # Tarsus mask in crop region at same scale
+        tarsus_padded = np.zeros((max_dim, max_dim), dtype=np.float32)
+        tarsus_padded[pad_top:pad_top + h_c, :w_c] = tarsus_bin[y1:y2, :].astype(np.float32)
+        tarsus_padded_512 = cv2.resize(tarsus_padded, (512, 512), interpolation=cv2.INTER_NEAREST)
+        tarsus_crop_region = tarsus_padded_512[r1:r2, :]
 
         result_image, tortuosity_data = compute_results_from_instance_map(
-            pred_instance_512, vis_tmp_path, get_unet(tarsus_version), device,
-            um_per_px=um_per_px_512,
-            precomputed_tarsus=tarsus_crop_512,
-            display_tarsus=tarsus_crop_512,
+            pred_instance_crop_region, vis_tmp_path, get_unet(tarsus_version), device,
+            um_per_px=um_per_px_iso,
+            precomputed_tarsus=tarsus_crop_region,
+            display_tarsus=tarsus_crop_region,
             show_title=False,
             show_tarsus=False,
         )
         os.unlink(vis_tmp_path)
 
-        # Embed 512x512 result into full original image, then re-add title at top
-        result_crop = result_image.convert("RGB").resize((W_orig, h_c), Image.BILINEAR)
+        # Embed crop result into full original image
+        result_crop = result_image.convert("RGB").resize((w_c, h_c), Image.BILINEAR)
         full_result = np.array(Image.open(temp_file_path).convert("RGB"))
         full_result[y1:y1+h_c, :] = np.array(result_crop)
 
