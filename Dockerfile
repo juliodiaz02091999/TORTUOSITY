@@ -48,7 +48,7 @@ RUN python -c "\
 import os; os.makedirs('/app/mask2former_config', exist_ok=True); \
 from transformers import Mask2FormerForUniversalSegmentation, AutoImageProcessor; \
 print('Downloading Mask2Former base model...'); \
-model = Mask2FormerForUniversalSegmentation.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_safetensors=True, low_cpu_mem_usage=True); \
+model = Mask2FormerForUniversalSegmentation.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_safetensors=True); \
 model.save_pretrained('/app/mask2former_config'); \
 print('Downloading processor...'); \
 proc = AutoImageProcessor.from_pretrained('facebook/mask2former-swin-small-cityscapes-instance', use_fast=False); \
