@@ -539,24 +539,10 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
         smooth_pts = _smooth_path(ordered_pts)
         tort_data = tort_analyzer.compute(smooth_pts, morph_data["length_um"])
 
-        # Filter skeleton artifacts: ICM > 3 indicates the path traversal
-        # created a circuitous route through a complex gland topology
-        if tort_data["ICM"] > 3.0:
-            continue
-
         gland_tortuosities.append(metrics['tortuosity'])
         gland_lengths.append(morph_data["length_px"])
         gland_thicknesses.append(morph_data["thickness_px"])
         pipeline_results.append({**morph_data, **tort_data, "gland_id": f"G{len(pipeline_results)+1}"})
-
-    # Filtrar outliers: tortuosidad > percentil 95 (cuando hay suficientes muestras)
-    if len(gland_tortuosities) > 3:
-        p95 = float(np.percentile(gland_tortuosities, 95))
-        keep = [t <= p95 for t in gland_tortuosities]
-        gland_tortuosities = [v for v, k in zip(gland_tortuosities, keep) if k]
-        gland_lengths      = [v for v, k in zip(gland_lengths,      keep) if k]
-        gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
-        pipeline_results   = [v for v, k in zip(pipeline_results,   keep) if k]
 
     # Tortuosidad clásica: mediana robusta; longitud/grosor en px para tarjetas sin calibrar = media
     avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
@@ -679,14 +665,6 @@ def show_combined_result(image_path, maskrcnn_model_path, unet_model_path, devic
 
         color = generate_random_color()
         colored_instance_image[pred_instance_cleaned == i] = color
-
-    # Filtrar outliers: tortuosidad > percentil 95
-    if len(gland_tortuosities) > 3:
-        p95 = float(np.percentile(gland_tortuosities, 95))
-        keep = [t <= p95 for t in gland_tortuosities]
-        gland_tortuosities = [v for v, k in zip(gland_tortuosities, keep) if k]
-        gland_lengths      = [v for v, k in zip(gland_lengths,      keep) if k]
-        gland_thicknesses  = [v for v, k in zip(gland_thicknesses,  keep) if k]
 
     # Promedio robusto: mediana
     avg_tortuosity = float(np.median(gland_tortuosities)) if gland_tortuosities else 0.0
