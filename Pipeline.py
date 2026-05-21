@@ -347,16 +347,17 @@ class TortuosityAnalyzer:
         kappa_max = float(curv.max()) if len(curv) > 0 else 0.0
         IMCC = kappa_max * (length_um / 1000.0)  # normalizado a mm
 
-        # --- Score clínico (solo ICM) ---
-        # ICM saturado en 1.0 (100% más largo que la cuerda = tortuosidad muy alta).
-        score = min((ICM - 1.0) / 1.0, 1.0) * 100
+        # --- Score clínico combinado (ICM + ITA) ---
+        icm_score = min((ICM - 1.0) / 1.0, 1.0) * 100   # 0–100 para ICM 1.0→2.0
+        ita_score = min(ITA_deg / 360.0, 1.0) * 100      # 0–100 para ITA 0°→360°
+        score = 0.5 * icm_score + 0.5 * ita_score
 
-        # Clasificación
-        if score < 20:
+        # Clasificación (umbrales calibrados para score combinado)
+        if score < 15:
             grade = "Normal"
-        elif score < 45:
+        elif score < 35:
             grade = "Leve"
-        elif score < 70:
+        elif score < 60:
             grade = "Moderada"
         else:
             grade = "Severa"
