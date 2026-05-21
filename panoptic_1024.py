@@ -201,12 +201,16 @@ def preprocess_image(
 # MODELO
 # ============================================================
 
+_LOCAL_CFG = "/app/mask2former_config"
+
 def build_model():
+    import os
+    src = _LOCAL_CFG if os.path.isdir(_LOCAL_CFG) else MODEL_ID
     model = Mask2FormerForUniversalSegmentation.from_pretrained(
-        MODEL_ID,
+        src,
         num_labels=2,
         ignore_mismatched_sizes=True,
-        use_safetensors=True,
+        local_files_only=os.path.isdir(_LOCAL_CFG),
     )
 
     model.config.id2label = ID2LABEL
@@ -714,11 +718,11 @@ def load_model_server(checkpoint_path, device=None):
     """Pre-load model + processor for server use (call once at startup)."""
     if device is None:
         device = _get_device()
+    import os
     model = load_trained_model(checkpoint_path, device=device)
-    _local_cfg = "/app/mask2former_config"
-    _proc_src = _local_cfg if os.path.isdir(_local_cfg) else MODEL_ID
+    _proc_src = _LOCAL_CFG if os.path.isdir(_LOCAL_CFG) else MODEL_ID
     processor = AutoImageProcessor.from_pretrained(
-        _proc_src, use_fast=False, local_files_only=os.path.isdir(_local_cfg)
+        _proc_src, use_fast=False, local_files_only=os.path.isdir(_LOCAL_CFG)
     )
     return model, processor
 
