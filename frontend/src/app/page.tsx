@@ -109,7 +109,7 @@ export default function DashboardPage() {
   const [convertToGray, setConvertToGray] = useState(true);
   const [selectedCapturedPhoto, setSelectedCapturedPhoto] = useState<StoredPhoto | null>(null);
   const [umPerPx, setUmPerPx] = useState<number>(1.0);
-  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "maskrcnn3" | "maskrcnn4" | "panoptic" | "panoptic6" | "panoptic1024">("maskrcnn");
+  const [segmentationModel, setSegmentationModel] = useState<"maskrcnn" | "maskrcnn2" | "maskrcnn3" | "maskrcnn4" | "panoptic" | "panoptic6" | "panoptic1024" | "mask2former768">("maskrcnn");
   const [tarsusVersion, setTarsusVersion] = useState<"v1" | "v2">("v1");
   const [contourMask, setContourMask] = useState<string | null>(null);
   const [showMaskDrawer, setShowMaskDrawer] = useState(false);
@@ -228,7 +228,7 @@ export default function DashboardPage() {
       formData.append("um_per_px", umPerPx.toString());
       formData.append("tarsus_version", tarsusVersion);
 
-      if ((segmentationModel === "panoptic" || segmentationModel === "panoptic6" || segmentationModel === "panoptic1024" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && contourMask) {
+      if ((segmentationModel === "panoptic" || segmentationModel === "panoptic6" || segmentationModel === "panoptic1024" || segmentationModel === "mask2former768" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && contourMask) {
         const maskBlob = await fetch(contourMask).then(r => r.blob());
         formData.append("contour_mask", new File([maskBlob], "contour_mask.png", { type: "image/png" }));
       }
@@ -237,6 +237,7 @@ export default function DashboardPage() {
         segmentationModel === "panoptic"      ? "/api/analyze-panoptic"
         : segmentationModel === "panoptic6"   ? "/api/analyze-panoptic6"
         : segmentationModel === "panoptic1024"? "/api/analyze-panoptic1024"
+        : segmentationModel === "mask2former768" ? "/api/analyze-mask2former768"
         : segmentationModel === "maskrcnn2"   ? "/api/analyze-maskrcnn2"
         : segmentationModel === "maskrcnn3"   ? "/api/analyze-maskrcnn3"
         : segmentationModel === "maskrcnn4"   ? "/api/analyze-maskrcnn4"
@@ -706,7 +707,7 @@ export default function DashboardPage() {
                     <div className="flex flex-col items-center space-y-2 w-full">
                       <Label className="text-sm font-medium">Modelo de segmentación</Label>
                       <div className="flex rounded-md border border-border overflow-hidden w-full max-w-sm">
-                        {(["maskrcnn", "maskrcnn2", "maskrcnn3", "maskrcnn4", "panoptic", "panoptic6", "panoptic1024"] as const).map((m) => (
+                        {(["maskrcnn", "maskrcnn2", "maskrcnn3", "maskrcnn4", "panoptic", "panoptic6", "panoptic1024", "mask2former768"] as const).map((m) => (
                           <button
                             key={m}
                             type="button"
@@ -717,7 +718,7 @@ export default function DashboardPage() {
                                 : "bg-background text-muted-foreground hover:bg-muted"
                             }`}
                           >
-                            {m === "maskrcnn" ? "R-CNN v1" : m === "maskrcnn2" ? "R-CNN v2" : m === "maskrcnn3" ? "R-CNN v3" : m === "maskrcnn4" ? "R-CNN v4" : m === "panoptic" ? "M2F v1" : m === "panoptic6" ? "M2F v2" : "M2F 1024"}
+                            {m === "maskrcnn" ? "R-CNN v1" : m === "maskrcnn2" ? "R-CNN v2" : m === "maskrcnn3" ? "R-CNN v3" : m === "maskrcnn4" ? "R-CNN v4" : m === "panoptic" ? "M2F v1" : m === "panoptic6" ? "M2F v2" : m === "panoptic1024" ? "M2F 1024" : "M2F 768"}
                           </button>
                         ))}
                       </div>
@@ -734,12 +735,14 @@ export default function DashboardPage() {
                           ? "Mask2Former v2 — 100 queries, thr 0.75 (best_model 32)"
                           : segmentationModel === "panoptic1024"
                           ? "Mask2Former 1024 — 150 queries, resolución 1024×1024 (best_model_mask2former_1024)"
+                          : segmentationModel === "mask2former768"
+                          ? "Mask2Former 768 — 150 queries, resolución 768×768 (best_model_mask2former 5)"
                           : "Mask R-CNN v1 — detección clásica (final_model 11)"}
                       </p>
                     </div>
 
                     {/* Contour mask drawing — for Mask2Former and Mask R-CNN v2 */}
-                    {(segmentationModel === "panoptic" || segmentationModel === "panoptic6" || segmentationModel === "panoptic1024" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && (selectedFile || selectedCapturedPhoto) && (
+                    {(segmentationModel === "panoptic" || segmentationModel === "panoptic6" || segmentationModel === "panoptic1024" || segmentationModel === "mask2former768" || segmentationModel === "maskrcnn2" || segmentationModel === "maskrcnn3" || segmentationModel === "maskrcnn4") && (selectedFile || selectedCapturedPhoto) && (
                       <div className="flex flex-col items-center space-y-1 w-full">
                         <div className="flex gap-2 items-center">
                           <button

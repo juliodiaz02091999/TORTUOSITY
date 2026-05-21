@@ -40,6 +40,7 @@ RUN if [ -f ".gitattributes" ] && grep -q "\.pth.*lfs" .gitattributes; then \
         curl -L "https://github.com/juliodiaz02091999/TORTUOSITY/raw/main/best_model%20(20).pth" -o "best_model (20).pth" || echo "Failed: best_model (20).pth"; \
         curl -L "https://github.com/juliodiaz02091999/TORTUOSITY/raw/main/best_model%20(32).pth" -o "best_model (32).pth" || echo "Failed: best_model (32).pth"; \
         curl -L "https://github.com/juliodiaz02091999/TORTUOSITY/raw/main/best_model_mask2former_1024.pth" -o "best_model_mask2former_1024.pth" || echo "Failed: best_model_mask2former_1024.pth"; \
+        curl -L "https://github.com/juliodiaz02091999/TORTUOSITY/raw/main/best_model_mask2former%20(5).pth" -o "best_model_mask2former (5).pth" || echo "Failed: best_model_mask2former (5).pth"; \
         ls -la *.pth; \
     fi
 
