@@ -349,8 +349,8 @@ class TortuosityAnalyzer:
 
         # --- Score clínico combinado (ICM + ITA) ---
         icm_score = min((ICM - 1.0) / 1.0, 1.0) * 100   # 0–100 para ICM 1.0→2.0
-        ita_score = min(ITA_deg / 360.0, 1.0) * 100      # 0–100 para ITA 0°→360°
-        score = 0.5 * icm_score + 0.5 * ita_score
+        ita_score = min(ITA_deg / 180.0, 1.0) * 100      # 0–100 para ITA 0°→180°
+        score = 0.7 * icm_score + 0.3 * ita_score
 
         # Clasificación (umbrales calibrados para score combinado)
         if score < 15:
