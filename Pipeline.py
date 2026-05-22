@@ -347,17 +347,16 @@ class TortuosityAnalyzer:
         kappa_max = float(curv.max()) if len(curv) > 0 else 0.0
         IMCC = kappa_max * (length_um / 1000.0)  # normalizado a mm
 
-        # --- Score clínico combinado (ICM + ITA) ---
-        icm_score = min((ICM - 1.0) / 1.0, 1.0) * 100   # 0–100 para ICM 1.0→2.0
-        ita_score = min(ITA_deg / 180.0, 1.0) * 100      # 0–100 para ITA 0°→180°
-        score = 0.7 * icm_score + 0.3 * ita_score
+        # --- Score clínico (ICM normalizado al rango real de meibomian glands) ---
+        # ICM típico: 1.0–1.3; raramente > 1.5. Normalizar a 0.3 da resolución útil.
+        score = min(max((ICM - 1.0) / 0.3, 0.0), 1.0) * 100
 
-        # Clasificación (umbrales calibrados para score combinado)
-        if score < 15:
+        # Clasificación
+        if score < 20:
             grade = "Normal"
-        elif score < 35:
+        elif score < 45:
             grade = "Leve"
-        elif score < 60:
+        elif score < 70:
             grade = "Moderada"
         else:
             grade = "Severa"
