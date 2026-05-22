@@ -238,7 +238,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                   {avgScore != null ? avgScore.toFixed(1) : "—"}
                   <span className="text-sm font-normal">/100</span>
                 </div>
-                <div className="text-xs text-muted-foreground">ponderado multi-índice</div>
+                <div className="text-xs text-muted-foreground">basado en ICM normalizado</div>
               </div>
               <div className="p-3 rounded-lg bg-muted text-center">
                 <div className="text-xs text-muted-foreground mb-1">Grado Global</div>
@@ -300,7 +300,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                     const icmN = toFiniteNumber(g?.ICM);
                     const itaN = toFiniteNumber(g?.ITA_deg);
                     const scoreN = toFiniteNumber(g?.tortuosity_score);
-                    const grade = g?.tortuosity_grade ?? (value <= 0.1 ? "Normal" : value <= 0.2 ? "Leve" : "Severa");
+                    const grade = g?.tortuosity_grade ?? (value <= 0.06 ? "Normal" : value <= 0.135 ? "Leve" : value <= 0.21 ? "Moderada" : "Severa");
                     const gradeStyle = getGradeStyle(grade);
                     return (
                       <TableRow key={g?.gland_id ?? index}>
@@ -384,22 +384,22 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <div className="text-center p-3 sm:p-4 bg-green-50 dark:bg-green-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-green-600">0 – 20</div>
               <div className="text-xs sm:text-sm font-semibold text-green-700 dark:text-green-300">Normal</div>
-              <div className="text-xs text-green-600 dark:text-green-400 mt-1">ICM ≈ 1.0</div>
+              <div className="text-xs text-green-600 dark:text-green-400 mt-1">ICM &lt; 1.06</div>
             </div>
             <div className="text-center p-3 sm:p-4 bg-yellow-50 dark:bg-yellow-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-yellow-600">20 – 45</div>
               <div className="text-xs sm:text-sm font-semibold text-yellow-700 dark:text-yellow-300">Leve</div>
-              <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">Cambios incipientes</div>
+              <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">ICM 1.06–1.14</div>
             </div>
             <div className="text-center p-3 sm:p-4 bg-orange-50 dark:bg-orange-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-orange-600">45 – 70</div>
               <div className="text-xs sm:text-sm font-semibold text-orange-700 dark:text-orange-300">Moderada</div>
-              <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">Seguimiento clínico</div>
+              <div className="text-xs text-orange-600 dark:text-orange-400 mt-1">ICM 1.14–1.21</div>
             </div>
             <div className="text-center p-3 sm:p-4 bg-red-50 dark:bg-red-950 rounded-lg">
               <div className="text-lg sm:text-2xl font-bold text-red-600">&gt; 70</div>
               <div className="text-xs sm:text-sm font-semibold text-red-700 dark:text-red-300">Severa</div>
-              <div className="text-xs text-red-600 dark:text-red-400 mt-1">Sugestivo de MGD</div>
+              <div className="text-xs text-red-600 dark:text-red-400 mt-1">ICM &gt; 1.21</div>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-muted-foreground">
@@ -410,7 +410,7 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
               <span className="font-semibold">DCF</span> — Densidad de inflexiones por µm de longitud
             </div>
             <div className="p-3 rounded-lg bg-muted">
-              <span className="font-semibold">Score</span> — Basado en ICM: (ICM − 1) × 100, saturado en 100
+              <span className="font-semibold">Score</span> — Basado en ICM: (ICM − 1) ÷ 0.3 × 100, saturado en 100
             </div>
           </div>
           <p className="text-xs text-muted-foreground italic text-center">
