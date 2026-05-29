@@ -705,9 +705,10 @@ async def analyze_image(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
-        
+
     except FileNotFoundError as e:
         raise HTTPException(
             status_code=500, 
@@ -840,6 +841,7 @@ async def analyze_maskrcnn2(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -969,6 +971,7 @@ async def analyze_maskrcnn3(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -1098,6 +1101,7 @@ async def analyze_maskrcnn4(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -1232,6 +1236,7 @@ async def analyze_panoptic6(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -1428,6 +1433,7 @@ async def analyze_panoptic(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -1550,6 +1556,7 @@ async def analyze_panoptic1024(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 
@@ -1673,6 +1680,7 @@ async def analyze_mask2former768(
                 "avg_tortuosity_score": tortuosity_data.get('avg_tortuosity_score', 0.0),
                 "dominant_grade": tortuosity_data.get('dominant_grade', "Normal"),
                 "individual_glands": tortuosity_data.get('individual_glands', []),
+                "glandular_density": tortuosity_data.get('glandular_density', 0.0),
             }
         })
 

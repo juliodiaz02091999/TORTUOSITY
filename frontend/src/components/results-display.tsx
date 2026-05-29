@@ -46,6 +46,7 @@ interface TortuosityData {
   avg_tortuosity_score?: number;
   dominant_grade?: string;
   individual_glands?: GlandResult[];
+  glandular_density?: number;
 }
 
 interface ResultsDisplayProps {
@@ -213,6 +214,19 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             <p className="text-xs text-muted-foreground">{unitLabel}</p>
           </CardContent>
         </Card>
+
+        <Card className="border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-xs sm:text-sm font-medium">Densidad Glandular</CardTitle>
+            <Microscope className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-lg sm:text-2xl font-bold">
+              {data.glandular_density != null ? `${data.glandular_density.toFixed(1)}%` : "—"}
+            </div>
+            <p className="text-xs text-muted-foreground">Glándulas / tarso</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Pipeline Clinical Summary */}
@@ -252,6 +266,13 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
                     Moda: {data.dominant_grade}
                   </div>
                 )}
+              </div>
+              <div className="p-3 rounded-lg bg-muted text-center">
+                <div className="text-xs text-muted-foreground mb-1">Densidad Glandular</div>
+                <div className="font-bold text-lg">
+                  {data.glandular_density != null ? `${data.glandular_density.toFixed(1)}%` : "—"}
+                </div>
+                <div className="text-xs text-muted-foreground">área glándulas / tarso</div>
               </div>
             </div>
           </CardContent>
@@ -411,6 +432,9 @@ export function ResultsDisplay({ data, processedImage }: ResultsDisplayProps) {
             </div>
             <div className="p-3 rounded-lg bg-muted">
               <span className="font-semibold">Score</span> — Basado en ICM: (ICM − 1) ÷ 0.3 × 100, saturado en 100
+            </div>
+            <div className="p-3 rounded-lg bg-muted">
+              <span className="font-semibold">Densidad Glandular</span> — Suma de áreas de glándulas / área del tarso (%). Normal ≥ 40 %; reducida 20–40 %; grave &lt; 20 %
             </div>
           </div>
           <p className="text-xs text-muted-foreground italic text-center">

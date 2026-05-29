@@ -504,6 +504,11 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
     pred_instance_cleaned = pred_instance * mask_tarsus_resized.astype(np.int32)
     pred_instance_cleaned = np.squeeze(pred_instance_cleaned)
 
+    # Densidad glandular: área de glándulas / área del tarso (%)
+    tarsus_area_px = float((mask_tarsus_resized > 0.5).sum())
+    gland_area_px  = float((pred_instance_cleaned > 0).sum())
+    glandular_density = (gland_area_px / tarsus_area_px * 100.0) if tarsus_area_px > 0 else 0.0
+
     # Crear imagen de instancias: asignar un color aleatorio único a cada instancia
     colored_instance_image = np.zeros((pred_instance_cleaned.shape[0], pred_instance_cleaned.shape[1], 3), dtype=np.uint8)
 
@@ -614,6 +619,7 @@ def compute_results_from_instance_map(pred_instance, image_path, unet_model, dev
         'avg_tortuosity_score': round(avg_score, 1),
         'dominant_grade': dominant_grade,
         'individual_glands': pipeline_results,
+        'glandular_density': round(glandular_density, 1),
     }
 
 
