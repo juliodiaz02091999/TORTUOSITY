@@ -25,38 +25,41 @@ interface DiceValidationProps {
   onTabChange?: (tab: 'upload' | 'capture' | 'results' | 'info' | 'dice') => void;
 }
 
-// Calculate Dice Coefficient between two binary masks
-function calculateDice(groundTruth: Uint8ClampedArray, prediction: Uint8ClampedArray): number {
+interface SegmentationMetrics {
+  dice: number;
+  f1: number;
+  iou: number;
+  accuracy: number;
+  recall: number;
+  precision: number;
+}
+
+function calculateMetrics(groundTruth: Uint8ClampedArray, prediction: Uint8ClampedArray): SegmentationMetrics {
   if (groundTruth.length !== prediction.length) {
     throw new Error("Masks must have the same size");
   }
 
-  let intersection = 0;
-  let gtSum = 0;
-  let predSum = 0;
+  let tp = 0, fp = 0, fn = 0, tn = 0;
+  const totalPixels = groundTruth.length / 4;
 
-  for (let i = 0; i < groundTruth.length; i += 4) {  // RGBA, check every 4th pixel
-    // Ground truth is drawn in green (R=0, G=255, B=0), so check green channel
-    const gtG = groundTruth[i + 1]; // Green channel
-    // Consider pixel as mask if green channel > 127 (half of 255)
-    const gtPixel = gtG > 127 ? 1 : 0;
-
-    // Predicted mask is usually grayscale, so check any RGB channel
-    const predR = prediction[i];
-    const predG = prediction[i + 1];
-    const predB = prediction[i + 2];
-    // Use max of RGB channels (works for grayscale where R=G=B)
-    const predGray = Math.max(predR, predG, predB);
+  for (let i = 0; i < groundTruth.length; i += 4) {
+    const gtPixel = groundTruth[i + 1] > 127 ? 1 : 0;
+    const predGray = Math.max(prediction[i], prediction[i + 1], prediction[i + 2]);
     const predPixel = predGray > 127 ? 1 : 0;
 
-    if (gtPixel === 1 && predPixel === 1) intersection++;
-    if (gtPixel === 1) gtSum++;
-    if (predPixel === 1) predSum++;
+    if (gtPixel === 1 && predPixel === 1) tp++;
+    else if (gtPixel === 0 && predPixel === 1) fp++;
+    else if (gtPixel === 1 && predPixel === 0) fn++;
+    else tn++;
   }
 
-  if (gtSum + predSum === 0) return 0;
+  const dice      = (2 * tp + fp + fn) === 0 ? 0 : (2 * tp) / (2 * tp + fp + fn);
+  const iou       = (tp + fp + fn) === 0 ? 0 : tp / (tp + fp + fn);
+  const accuracy  = totalPixels === 0 ? 0 : (tp + tn) / totalPixels;
+  const recall    = (tp + fn) === 0 ? 0 : tp / (tp + fn);
+  const precision = (tp + fp) === 0 ? 0 : tp / (tp + fp);
 
-  return (2 * intersection) / (gtSum + predSum);
+  return { dice, f1: dice, iou, accuracy, recall, precision };
 }
 
 export function DiceValidation({ onTabChange }: DiceValidationProps) {
@@ -70,7 +73,7 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
   const [isApplyingClahe, setIsApplyingClahe] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [diceScore, setDiceScore] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<SegmentationMetrics | null>(null);
   const [predictedMaskUrl, setPredictedMaskUrl] = useState<string | null>(null);
   const [groundTruthMaskUrl, setGroundTruthMaskUrl] = useState<string | null>(null);
 
@@ -291,7 +294,7 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
 
     maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     setGroundTruthMaskUrl(null);
-    setDiceScore(null);
+    setMetrics(null);
     redrawCanvas();
   };
 
@@ -300,7 +303,7 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
 
     setIsAnalyzing(true);
     setError(null);
-    setDiceScore(null);
+    setMetrics(null);
     setPredictedMaskUrl(null);
     setGroundTruthMaskUrl(null);
 
@@ -393,13 +396,11 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
         resizedCtx.drawImage(maskCanvas, 0, 0, predictedData.width, predictedData.height);
         const resizedGroundTruthData = resizedCtx.getImageData(0, 0, resizedCanvas.width, resizedCanvas.height);
         
-        // Calculate Dice with resized masks
-        const dice = calculateDice(resizedGroundTruthData.data, predictedData.data);
-        setDiceScore(dice);
+        const m = calculateMetrics(resizedGroundTruthData.data, predictedData.data);
+        setMetrics(m);
       } else {
-        // Calculate Dice
-        const dice = calculateDice(groundTruthData.data, predictedData.data);
-        setDiceScore(dice);
+        const m = calculateMetrics(groundTruthData.data, predictedData.data);
+        setMetrics(m);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error en el análisis");
@@ -539,12 +540,12 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
                 {isAnalyzing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Calculando Dice...
+                    Calculando métricas...
                   </>
                 ) : (
                   <>
                     <Calculator className="mr-2 h-4 w-4" />
-                    Calcular Dice Coefficient
+                    Calcular Métricas de Segmentación
                   </>
                 )}
               </Button>
@@ -552,29 +553,37 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
           </Card>
 
           {/* Results Section */}
-          {diceScore !== null && (
+          {metrics !== null && (
             <Card>
               <CardHeader>
-                <CardTitle>Resultado del Dice Coefficient</CardTitle>
+                <CardTitle>Métricas de Segmentación</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="text-center">
-                  <div className="text-6xl font-bold text-primary mb-2">
-                    {diceScore.toFixed(4)}
-                  </div>
-                  <p className="text-muted-foreground">Dice Similarity Coefficient</p>
+                {/* Metric cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {[
+                    { label: "Dice", value: metrics.dice, desc: "Coeficiente de similitud" },
+                    { label: "F1 Score", value: metrics.f1, desc: "= Dice (segm. binaria)" },
+                    { label: "IoU", value: metrics.iou, desc: "Jaccard Index" },
+                    { label: "Accuracy", value: metrics.accuracy, desc: "Exactitud global" },
+                    { label: "Recall", value: metrics.recall, desc: "Sensibilidad (TP rate)" },
+                    { label: "Precision", value: metrics.precision, desc: "Valor pred. positivo" },
+                  ].map(({ label, value, desc }) => (
+                    <div key={label} className="p-3 rounded-lg bg-muted text-center">
+                      <div className="text-xs text-muted-foreground mb-1">{label}</div>
+                      <div className="text-xl font-bold">{value.toFixed(4)}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{desc}</div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                {/* Mask images */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                   {groundTruthMaskUrl && (
                     <div>
                       <h4 className="font-semibold mb-2">Máscara Ground Truth</h4>
                       <div className="border rounded-lg overflow-hidden">
-                        <img
-                          src={groundTruthMaskUrl}
-                          alt="Máscara ground truth"
-                          className="w-full"
-                        />
+                        <img src={groundTruthMaskUrl} alt="Máscara ground truth" className="w-full" />
                       </div>
                     </div>
                   )}
@@ -582,25 +591,23 @@ export function DiceValidation({ onTabChange }: DiceValidationProps) {
                     <div>
                       <h4 className="font-semibold mb-2">Máscara Predicha</h4>
                       <div className="border rounded-lg overflow-hidden">
-                        <img
-                          src={predictedMaskUrl}
-                          alt="Máscara predicha"
-                          className="w-full"
-                        />
+                        <img src={predictedMaskUrl} alt="Máscara predicha" className="w-full" />
                       </div>
                     </div>
                   )}
                 </div>
 
+                {/* Interpretation guide */}
                 <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-950">
                   <h4 className="font-semibold text-blue-900 dark:text-blue-100 mb-2">
                     Interpretación
                   </h4>
                   <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-                    <li>• <strong>Dice = 1.0:</strong> Segmentación perfecta</li>
-                    <li>• <strong>Dice &gt; 0.7:</strong> Buena segmentación</li>
-                    <li>• <strong>Dice 0.5-0.7:</strong> Segmentación moderada</li>
-                    <li>• <strong>Dice &lt; 0.5:</strong> Segmentación pobre</li>
+                    <li>• <strong>Dice/F1/IoU = 1.0:</strong> Segmentación perfecta</li>
+                    <li>• <strong>Dice &gt; 0.7 / IoU &gt; 0.5:</strong> Buena segmentación</li>
+                    <li>• <strong>Recall alto:</strong> pocas glándulas perdidas (FN bajos)</li>
+                    <li>• <strong>Precision alta:</strong> pocas falsas detecciones (FP bajos)</li>
+                    <li>• <strong>Accuracy:</strong> puede ser engañosa si el fondo domina la imagen</li>
                   </ul>
                 </div>
               </CardContent>
